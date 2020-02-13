@@ -1,5 +1,8 @@
 import logging
 import torch
+import networkx as nx
+import dgl
+import matplotlib.pyplot as plt
 from transformers import BertTokenizer, BertModel
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import LabelEncoder
@@ -179,7 +182,7 @@ class SonarDataset(Dataset):
             if self.sentence_encoder:
                 itm.append((wid, upos, feats, head, deprel, encoded_sentence[i], frame, role))
             else:
-                itm.append((wid, upos, feats, head, deprel, None, frame, role))
+                itm.append((wid, upos, feats, head, deprel, torch.zeros([1,1]), frame, role))
 
         return itm
 
@@ -196,7 +199,7 @@ class SonarDataset(Dataset):
         
         # FEATS is a '|' separated list of labels
         # we'll get a 2D tensor; collapse (sum) it to a vector
-        t_feats = self.to_one_hot(self.feats_codec, feats.split('|')).sum(dim=0)
+        t_feats = self.to_one_hot(self.feats_codec, feats.split('|')).sum(dim=0, keepdim=True)
 
         t_head = head
         t_deprel = self.to_one_hot(self.deprel_codec, [deprel])
@@ -205,11 +208,50 @@ class SonarDataset(Dataset):
         return t_wid, t_upos, t_feats, t_head, t_deprel, t_frame, t_role
 
 
+def sentence_to_graph(sentence):
+    g = dgl.DGLGraph()
+
+    wid_to_nid = {}
+
+    # add nodes
+    for token in sentence:
+        wid, upos, feats, head, deprel, form, frame, role = token
+        g.add_nodes(1, {
+            'upos': upos,
+            'feats': feats,
+            'form': form,
+            'frame': frame,
+            'role': role
+            })
+
+        wid_to_nid[wid] = len(g) - 1
+        print (wid, wid_to_nid[wid])
+
+    # add edges
+    for token in sentence:
+        wid, upos, feats, head, deprel, form, frame, role = token
+        if head != 0:
+            g.add_edges(wid_to_nid[wid], wid_to_nid[head], {
+                'deprel': deprel
+                })
+
+    return g
+
+def draw_graph(graph, labels=None):
+    ng = g.to_networkx(node_attrs=['upos'], edge_attrs=['deprel'])
+
+    if labels:
+        nx.relabel_nodes(ng, lambda x: labels[x-1], copy=False)
+
+    nx.draw(ng, with_labels=True)
+    plt.show()
+
+
 if __name__ == '__main__':
-    bert_encoder = BertEncoder()
-    mysonar = SonarDataset('sonar1_fixed.conllu') #, sentence_encoder=bert_encoder)
-    print (mysonar[30])
-    #dataloader = DataLoader(dataset=mysonar, batch_size=16, shuffle=True)
-    #for i, batch in enumerate(dataloader):
-    #    print (i, batch)
+    # sentence_encoder = BertEncoder()
+    # mysonar = SonarDataset('sonar1_fixed.conllu', sentence_encoder=sentence_encoder)
+    mysonar = SonarDataset('sonar1_fixed.conllu') # Skip loading bert for now (this is much faster)
+
+    g = sentence_to_graph(mysonar[100])
+    draw_graph(g, labels=mysonar.raw_sentences[100])
 
