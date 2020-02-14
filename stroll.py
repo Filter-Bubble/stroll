@@ -169,20 +169,31 @@ class SonarDataset(Dataset):
 
         # First add the simple, one-hot-encoded features
         for i, word in enumerate(sentence):
-            wid, upos, feats, head, deprel, frame, role = self.one_hot_sample(
-                    word[self.ID],
-                    word[self.UPOS],
-                    word[self.FEATS], 
-                    word[self.HEAD],
-                    word[self.DEPREL],
-                    word[self.FRAME],
-                    word[self.ROLE]
-                )
+            # INPUTS
+
+            # grah structure, including 'form' for drawing the graph
+            wid = word[self.ID]
+            form = string_to_tensor(word[self.FORM], 20).view(1,20)
+            head = word[self.HEAD]
+
+            # features
+            # FEATS is a '|' separated list of labels
+            # we'll get a 2D tensor; collapse (sum) it to a vector
+            upos = self.to_one_hot(self.upos_codec, [word[self.UPOS]])
+            deprel = self.to_one_hot(self.deprel_codec, [word[self.DEPREL]])
+            feats = self.to_one_hot(self.feats_codec, word[self.FEATS].split('|')).sum(axis=0, keepdim=True)
 
             if self.sentence_encoder:
-                itm.append((wid, upos, feats, head, deprel, encoded_sentence[i], frame, role))
+                embedding = encoded_sentence[i]
             else:
-                itm.append((wid, upos, feats, head, deprel, torch.zeros([1,1]), frame, role))
+                embedding = torch.zeros([1,1])
+
+            # OUTPUTS
+            frame = torch.tensor(self.frame_codec.transform([word[self.FRAME]]))
+            role = torch.tensor(self.role_codec.transform([word[self.ROLE]]))
+
+            newitem = (wid, form, upos, feats, head, deprel, embedding, frame, role)
+            itm.append( newitem )
 
         return itm
 
@@ -206,7 +217,32 @@ class SonarDataset(Dataset):
         t_frame = self.to_one_hot(self.frame_codec, [frame])
         t_role = self.to_one_hot(self.role_codec, [role])
         return t_wid, t_upos, t_feats, t_head, t_deprel, t_frame, t_role
+def string_to_tensor(s, max_length=16):
+    t = torch.zeros(max_length)
 
+    # convert to bytearray
+    b = s.encode()
+
+    # first number is the string length (truncated)
+    l = min(len(b), max_length - 1)
+
+    t[0] = l
+    for i in range(l):
+        t[i+1] = b[i]
+
+    return t
+
+def tensor_to_string(tt):
+    # cast to 1d tensor
+    t = tt.view(-1)
+
+    # get the string length
+    l = int(t[0])
+
+    # cast to a byte array
+    s = bytearray([ int(c) for c in t[1: l+1 ].tolist() ])
+
+    return s.decode()
 
 def sentence_to_graph(sentence):
     g = dgl.DGLGraph()
@@ -215,21 +251,21 @@ def sentence_to_graph(sentence):
 
     # add nodes
     for token in sentence:
-        wid, upos, feats, head, deprel, form, frame, role = token
+        wid, form, upos, feats, head, deprel, embedding, frame, role = token
         g.add_nodes(1, {
+            'form': form,
             'upos': upos,
             'feats': feats,
-            'form': form,
+            'embedding': embedding,
             'frame': frame,
             'role': role
             })
 
         wid_to_nid[wid] = len(g) - 1
-        print (wid, wid_to_nid[wid])
 
     # add edges
     for token in sentence:
-        wid, upos, feats, head, deprel, form, frame, role = token
+        wid, form, upos, feats, head, deprel, embedding, frame, role = token
         if head != 0:
             g.add_edges(wid_to_nid[wid], wid_to_nid[head], {
                 'deprel': deprel
@@ -237,11 +273,13 @@ def sentence_to_graph(sentence):
 
     return g
 
-def draw_graph(graph, labels=None):
-    ng = g.to_networkx(node_attrs=['upos'], edge_attrs=['deprel'])
+def draw_graph(graph):
+    label_tensor = graph.ndata['form']
 
-    if labels:
-        nx.relabel_nodes(ng, lambda x: labels[x-1], copy=False)
+    ng = graph.to_networkx()
+    nx.relabel_nodes(ng,
+            lambda x: tensor_to_string(label_tensor[x]),
+            copy=False)
 
     nx.draw(ng, with_labels=True)
     plt.show()
@@ -254,4 +292,13 @@ if __name__ == '__main__':
 
     g = sentence_to_graph(mysonar[100])
     draw_graph(g, labels=mysonar.raw_sentences[100])
+    g = sentence_to_graph(mysonar[700])
+
+    # add self edges
+    g.add_edges(g.nodes(), g.nodes(), {
+        'deprel': mysonar.to_one_hot(mysonar.deprel_codec, ['_']) # TODO: separate symbol for self edges?
+        })
+
+    # print (mysonar.raw_sentences[700])
+    draw_graph(g)
 
