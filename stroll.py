@@ -204,19 +204,7 @@ class SonarDataset(Dataset):
         value_idxs = codec.transform(values)
         return torch.eye(len(codec.classes_))[value_idxs]
 
-    def one_hot_sample(self, wid, upos, feats, head, deprel, frame, role):
-        t_wid = wid
-        t_upos = self.to_one_hot(self.upos_codec, [upos])
-        
-        # FEATS is a '|' separated list of labels
-        # we'll get a 2D tensor; collapse (sum) it to a vector
-        t_feats = self.to_one_hot(self.feats_codec, feats.split('|')).sum(dim=0, keepdim=True)
 
-        t_head = head
-        t_deprel = self.to_one_hot(self.deprel_codec, [deprel])
-        t_frame = self.to_one_hot(self.frame_codec, [frame])
-        t_role = self.to_one_hot(self.role_codec, [role])
-        return t_wid, t_upos, t_feats, t_head, t_deprel, t_frame, t_role
 def string_to_tensor(s, max_length=16):
     t = torch.zeros(max_length)
 
