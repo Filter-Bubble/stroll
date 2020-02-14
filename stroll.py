@@ -58,7 +58,6 @@ class BertEncoder:
         
         return outputs
 
-
 class SonarDataset(Dataset):
     def _init_labelencoders(self):
         self.upos_codec.fit([
@@ -225,6 +224,7 @@ def string_to_tensor(s, max_length=16):
         t[i+1] = b[i]
 
     return t
+
 
 def tensor_to_string(tt):
     # cast to 1d tensor
