@@ -1,11 +1,17 @@
 import logging
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import networkx as nx
 import dgl
+import dgl.function as fn
 import matplotlib.pyplot as plt
 from transformers import BertTokenizer, BertModel
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import LabelEncoder
+
+import time
+import numpy as np
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -273,13 +279,58 @@ def draw_graph(graph):
     plt.show()
 
 
+class NodeApplyModule(nn.Module):
+    def __init__(self, in_feats, out_feats, activation):
+        super(NodeApplyModule, self).__init__()
+        self.linear = nn.Linear(in_feats, out_feats)
+        self.activation = activation
+
+    def forward(self, node):
+        feats = self.linear(node.data['h'])
+        if self.activation is not None:
+            feats = self.activation(feats)
+        return {'h' : feats}
+
+class GCN(nn.Module):
+    def __init__(self, in_feats, out_feats, activation):
+        super(GCN, self).__init__()
+        self.apply_mod = NodeApplyModule(in_feats, out_feats, activation)
+
+    def forward(self, g, feature):
+
+        gcn_msg = fn.copy_src(src='h', out='m')
+        gcn_reduce = fn.sum(msg='m', out='h')
+
+        g.ndata['h'] = feature
+        g.update_all(gcn_msg, gcn_reduce)
+        g.apply_nodes(func=self.apply_mod)
+        return g.ndata.pop('h')
+
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.gcn1 = GCN(17, 16, F.relu)
+        self.gcn2 = GCN(16, 2, None)
+
+    def forward(self, g):
+        x = self.gcn1(g, g.ndata['upos'])
+        x = self.gcn2(g, x)
+        return x
+
+def evaluate(model, g, p=False):
+    model.eval()
+    with torch.no_grad():
+        logits = model(g)
+        labels = g.ndata['frame']
+        _, indices = torch.max(logits, dim=1)
+        correct = torch.sum(indices == labels)
+        return correct.item() * 1.0 / len(labels)
+
 if __name__ == '__main__':
     # sentence_encoder = BertEncoder()
     # mysonar = SonarDataset('sonar1_fixed.conllu', sentence_encoder=sentence_encoder)
     mysonar = SonarDataset('sonar1_fixed.conllu') # Skip loading bert for now (this is much faster)
 
-    g = sentence_to_graph(mysonar[100])
-    draw_graph(g, labels=mysonar.raw_sentences[100])
     g = sentence_to_graph(mysonar[700])
 
     # add self edges
@@ -290,3 +341,34 @@ if __name__ == '__main__':
     # print (mysonar.raw_sentences[700])
     draw_graph(g)
 
+    # Create the model using the graph
+    net = Net()
+    print(net)
+
+    optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
+    dur = []
+    for epoch in range(400):
+        if epoch >=3:
+            t0 = time.time()
+
+        net.train()
+        logits = net(g).transpose(0,1)
+        target = g.ndata['frame']
+
+        # inputs (minibatch, C, d_1, d_2, ..., d_K) -> torch.Size([2, 7])
+        # target (minibatch,    d_1, d_2, ..., d_K) -> tensor([0, 0, 0, 0, 0, 0, 0])
+        # minibatch = minibatch Size
+        # C         = number of classes
+        # d_x       = extra dimensions
+        loss = F.cross_entropy(logits.view(1,2,8), target.view(1,8))
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if epoch >=3:
+            dur.append(time.time() - t0)
+
+        acc = evaluate(net, g)
+        print("Epoch {:05d} | Loss {:.4f} | Test Acc {:.4f} | Time(s) {:.4f}".format(
+                epoch, loss.item(), acc, np.mean(dur)))
