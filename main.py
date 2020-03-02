@@ -10,6 +10,8 @@ from stroll.graph import GraphDataset, draw_graph
 from stroll.model import Net
 from stroll.labels import BertEncoder
 
+torch.manual_seed(43)
+
 # Not used at the moment
 # device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -19,8 +21,8 @@ from stroll.labels import BertEncoder
 
 if __name__ == '__main__':
     # Skip loading bert for now (this is a bit slow)
-    sentence_encoder = BertEncoder()
-    # sentence_encoder = None
+    # sentence_encoder = BertEncoder()
+    sentence_encoder = None
 
     sonar = GraphDataset('sonar1_fixed.conllu', sentence_encoder=sentence_encoder)
     train_length = int(0.9 * len(sonar))
@@ -28,7 +30,10 @@ if __name__ == '__main__':
     train_set, test_set = random_split(sonar, [train_length, test_length])
 
     # Create network
-    net = Net()
+    # out_feats:
+    # ROLE := 21
+    # FRAME := 2
+    net = Net(in_feats=sonar.in_feats, h_dims=16, out_feats=21)
     print(net)
 
     def sigterm_handler(_signo, _stack_frame):

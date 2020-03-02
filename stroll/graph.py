@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import networkx as nx
+import torch
 import dgl
 import dgl.function as fn
 
@@ -18,8 +19,8 @@ def draw_graph(graph):
     plt.show()
 
 class GraphDataset(ConlluDataset):
-    def __init__(self, filename, sentence_encoder=None):
-        super().__init__(filename)
+    def __init__(self, filename, features=['UPOS'], sentence_encoder=None):
+        super().__init__(filename, features)
         self.sentence_encoder = sentence_encoder
         
     def __getitem__(self, index):
@@ -33,7 +34,7 @@ class GraphDataset(ConlluDataset):
         # add nodes
         for token in sentence:
             g.add_nodes(1, {
-                'v': token.WVEC.view(1,-1),
+                'v': torch.cat([token[f] for f in self.features], 0).view(1,-1),
                 'frame': token.FRAME,
                 'role': token.ROLE
                 })

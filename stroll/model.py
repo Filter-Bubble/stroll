@@ -33,10 +33,10 @@ class GCN(nn.Module):
 
 
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self, in_feats=16, h_dims=16, out_feats=16):
         super(Net, self).__init__()
-        self.gcn1 = GCN(768, 16, F.relu)
-        self.gcn2 = GCN(16, 21, None)
+        self.gcn1 = GCN(in_feats, h_dims, F.relu)
+        self.gcn2 = GCN(h_dims, out_feats, None)
 
     def forward(self, g):
         x = self.gcn1(g, g.ndata['v'])

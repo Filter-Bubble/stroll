@@ -49,6 +49,15 @@ class Token():
                 self.FRAME, self.ROLE 
                 )
 
+    def __getitem__(self, index):
+        if index == 'UPOS':
+            return self.UPOS
+        elif index == 'FEATS':
+            return self.FEATS
+        elif index == 'WVEC':
+            return self.WVEC
+        return None
+
     def encode(self):
         return Token([
             self.ID, # not encoded
@@ -109,6 +118,19 @@ class Sentence():
 
 
 class ConlluDataset(Dataset):
+    def __init__(self, filename, features):
+        self.sentences = []
+        self.features = features
+
+        self.in_feats = 0
+        if 'UPOS' in features:
+            self.in_feats = self.in_feats + len(upos_codec.classes_)
+        if 'FEATS' in features:
+            self.in_feats = self.in_feats + len(feats_codec.classes_)
+        if 'WVEC' in features:
+            self.in_feats = self.in_feats + 768
+
+        self._load(filename)
 
     def _load(self, filename):
         logging.info("Opening {}".format(filename))
@@ -149,10 +171,6 @@ class ConlluDataset(Dataset):
             else:
                 fields = line.split('\t')
                 sentence.add(Token(fields))
-
-    def __init__(self, filename):
-        self.sentences = []
-        self._load(filename)
 
     def __getitem__(self, index):
         return self.sentences[index]
