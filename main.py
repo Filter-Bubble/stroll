@@ -41,7 +41,7 @@ if __name__ == '__main__':
     # out_feats:
     # ROLE := 21
     # FRAME := 2
-    net = Net(in_feats=sonar.in_feats, h_dims=16, out_feats=21)
+    net = Net(in_feats=sonar.in_feats, h_dims=16, out_feats_a=2, out_feats_b=21)
     print(net)
 
     def sigterm_handler(_signo, _stack_frame):
@@ -49,6 +49,7 @@ if __name__ == '__main__':
         writer.close()
         torch.save(net.state_dict(), './model.pt')
         exit(0)
+
     signal.signal(signal.SIGTERM, sigterm_handler)
     signal.signal(signal.SIGINT, sigterm_handler)
 
@@ -82,9 +83,18 @@ if __name__ == '__main__':
             # minibatch = minibatch Size
             # C         = number of classes
             # d_x       = extra dimensions
-            logits = net(g).transpose(0,1)
+            logits_frame, logits_role = net(g)
+
+            target = g.ndata['frame']
+            logits_frame = logits_frame.transpose(0,1)
+            loss_frame = F.cross_entropy(logits_frame.view(1,2,-1), target.view(1,-1))
+
             target = g.ndata['role']
-            loss = F.cross_entropy(logits.view(1,21,-1), target.view(1,-1))
+            logits_role = logits_role.transpose(0,1)
+            loss_role = F.cross_entropy(logits_role.view(1,21,-1), target.view(1,-1))
+
+            # add the two losses
+            loss = loss_role + loss_frame
 
             # apply loss
             optimizer.zero_grad()
@@ -98,18 +108,17 @@ if __name__ == '__main__':
                 # draw_graph(g)
 
                 dur = time.time() - t0
-                acc1 = net.evaluate_frame(test_graph)
-                acc2 = net.evaluate_role(test_graph)
+                acc1, acc2, conf1, conf2 = net.evaluate(test_graph)
                 print("Elements {:08d} | Loss {:.4f} | Acc1 {:.4f} | Acc2 {:.4f} | words/sec {:4.3f}".format(
                         word_count, loss.item(), acc1, acc2, len(g) / dur
                         )
                      )
 
-                grid = torchvision.utils.make_grid([torch.eye(2)])
-                writer.add_image('confusion_matrix-Frame', grid)
+                grid = torchvision.utils.make_grid([torch.from_numpy(conf1)])
+                writer.add_image('confusion_matrix-Frame', grid, word_count)
 
-                grid = torchvision.utils.make_grid([torch.eye(16)])
-                writer.add_image('confusion_matrix-Role', grid)
+                grid = torchvision.utils.make_grid([torch.from_numpy(conf2)])
+                writer.add_image('confusion_matrix-Role', grid, word_count)
 
                 writer.add_scalar('training loss', loss.item(), word_count)
                 writer.add_scalar('accuracy_frame', acc1, word_count)

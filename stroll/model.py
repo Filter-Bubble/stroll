@@ -4,6 +4,9 @@ import torch.nn.functional as F
 
 import dgl.function as fn
 
+import numpy as np
+from sklearn.metrics import confusion_matrix
+
 class NodeApplyModule(nn.Module):
     def __init__(self, in_feats, out_feats, activation):
         super(NodeApplyModule, self).__init__()
@@ -33,31 +36,38 @@ class GCN(nn.Module):
 
 
 class Net(nn.Module):
-    def __init__(self, in_feats=16, h_dims=16, out_feats=16):
+    def __init__(self, in_feats=16, h_dims=16, out_feats_a=2, out_feats_b=16):
         super(Net, self).__init__()
         self.gcn1 = GCN(in_feats, h_dims, F.relu)
-        self.gcn2 = GCN(h_dims, out_feats, None)
+        self.gcn2 = GCN(h_dims, h_dims, F.relu)
+        self.linear1a = nn.Linear(h_dims, out_feats_a)
+        self.linear1b = nn.Linear(h_dims, out_feats_b)
 
     def forward(self, g):
         x = self.gcn1(g, g.ndata['v'])
         x = self.gcn2(g, x)
-        return x
+        xa = self.linear1a(x)
+        xb = self.linear1b(x)
+        return xa, xb
 
-    def evaluate_role(self, g):
+    def evaluate(self, g):
         self.eval()
         with torch.no_grad():
-            logits = self(g)
-            _, indices = torch.max(logits, dim=1)
-            targets = g.ndata['role']
-            correct = torch.sum(indices == targets)
-            return correct.item() * 1.0 / len(targets)
+            logits_a, logits_b = self(g)
 
-    def evaluate_frame(self, g):
-        self.eval()
-        with torch.no_grad():
-            logits = self(g)
-            _, indices = torch.max(logits, dim=1)
-            targets = g.ndata['frame']
-            correct = torch.sum(indices == targets)
-            return correct.item() * 1.0 / len(targets)
+            _, pred_a = torch.max(logits_a, dim=1)
+            _, pred_b = torch.max(logits_b, dim=1)
 
+            targets_a = g.ndata['frame']
+            targets_b = g.ndata['role']
+
+            correct_a = torch.sum(pred_a == targets_a)
+            correct_b = torch.sum(pred_b == targets_b)
+
+            acc_a = correct_a.item() * 1.0 / len(targets_a)
+            acc_b = correct_b.item() * 1.0 / len(targets_b)
+
+            conf_a = confusion_matrix(pred_a, targets_a, labels=np.arange(2))
+            conf_b = confusion_matrix(pred_b, targets_b, labels=np.arange(21))
+
+            return  acc_a, acc_b, conf_a, conf_b
