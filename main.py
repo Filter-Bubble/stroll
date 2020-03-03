@@ -3,6 +3,11 @@ import signal
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
+
+from torch.utils.tensorboard import SummaryWriter
+
+import torchvision
+
 import dgl
 import dgl.function as fn
 
@@ -29,6 +34,9 @@ if __name__ == '__main__':
     test_length = len(sonar) - train_length
     train_set, test_set = random_split(sonar, [train_length, test_length])
 
+    # Test setings
+    test_graph = dgl.batch([g for g in test_set])
+    print ('Test set contains {} words.'.format(len(test_graph)))
     # Create network
     # out_feats:
     # ROLE := 21
@@ -38,6 +46,7 @@ if __name__ == '__main__':
 
     def sigterm_handler(_signo, _stack_frame):
         print('Aborting')
+        writer.close()
         torch.save(net.state_dict(), './model.pt')
         exit(0)
     signal.signal(signal.SIGTERM, sigterm_handler)
@@ -52,18 +61,20 @@ if __name__ == '__main__':
     #  * 2 epochs
     num_epochs = 2
 
-    # Test setings
-    test_graph = dgl.batch([g for g in test_set])
-    print ('Test set contains {} words.'.format(len(test_graph)))
+    # Log settings
+    # default `log_dir` is "runs" - we'll be more specific here
+    writer = SummaryWriter('runs/experiment1')
+
+    # diagnostic settings
+    word_count = 0
+    count_per_eval = 1000
+    next_eval = count_per_eval
+    t0 = time.time()
 
     # loop over the epochs
     for epoch in range(num_epochs):
         # loop over each minibatch
-        t0 = time.time()
-        word_count = 0
         for g in trainloader:
-            # draw_graph(g)
-
             net.train()
 
             # inputs (minibatch, C, d_1, d_2, ..., d_K)
@@ -81,17 +92,38 @@ if __name__ == '__main__':
             optimizer.step()
 
             # diagnostics
-            dur = time.time() - t0
             word_count = word_count + len(g)
-            acc = net.evaluate_role(test_graph)
-            print("Elements {:08d} | Loss {:.4f} | Acc {:.4f} | words/sec {:4.3f}".format(
-                    word_count, loss.item(), acc, len(g) / dur
-                    )
-                 )
 
-            # reset timer
-            t0 = time.time()
+            if word_count > next_eval:
+                # draw_graph(g)
+
+                dur = time.time() - t0
+                acc1 = net.evaluate_frame(test_graph)
+                acc2 = net.evaluate_role(test_graph)
+                print("Elements {:08d} | Loss {:.4f} | Acc1 {:.4f} | Acc2 {:.4f} | words/sec {:4.3f}".format(
+                        word_count, loss.item(), acc1, acc2, len(g) / dur
+                        )
+                     )
+
+                grid = torchvision.utils.make_grid([torch.eye(2)])
+                writer.add_image('confusion_matrix-Frame', grid)
+
+                grid = torchvision.utils.make_grid([torch.eye(16)])
+                writer.add_image('confusion_matrix-Role', grid)
+
+                writer.add_scalar('training loss', loss.item(), word_count)
+                writer.add_scalar('accuracy_frame', acc1, word_count)
+                writer.add_scalar('accuracy_role', acc2, word_count)
+
+                for name, param in net.state_dict().items():
+                     writer.add_histogram('hist_' + name, param, word_count)
+                     writer.add_scalar('norm_' + name, torch.norm(param), word_count)
+
+                # reset timer
+                next_eval = next_eval + count_per_eval
+                t0 = time.time()
 
         print ('Epoch {} done'.format(epoch))
 
     torch.save(net.state_dict(), './model.pt')
+    writer.close()
