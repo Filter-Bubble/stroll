@@ -27,6 +27,9 @@ torch.manual_seed(43)
 # https://towardsdatascience.com/understanding-pytorch-with-an-example-a-step-by-step-tutorial-81fc5f8c4e8e
 # https://towardsdatascience.com/building-efficient-custom-datasets-in-pytorch-2563b946fd9f
 
+role_weights = torch.tensor([2.584660556529111e-06, 5.547542438699656e-05, 3.2325844512687896e-05, 0.00014400921658986175, 0.00199203187250996, 0.0016835016835016834, 0.5, 0.0001998001998001998, 0.0006447453255963894, 0.0018248175182481751, 0.00018986140117714068, 0.0010964912280701754, 0.0001502178158329578, 0.00020699648105982198, 0.00017188037126160193, 0.00034614053305642093, 0.0005672149744753262, 0.0008756567425569177, 0.0008481764206955047, 0.2, 0.00010061374383740819])
+frame_weights = torch.tensor([2.1981838604944596e-06, 2.7407772844378667e-05])
+
 if __name__ == '__main__':
     # Skip loading bert for now (this is a bit slow)
     # sentence_encoder = BertEncoder()
@@ -90,11 +93,11 @@ if __name__ == '__main__':
 
             target = g.ndata['frame']
             logits_frame = logits_frame.transpose(0,1)
-            loss_frame = F.cross_entropy(logits_frame.view(1,2,-1), target.view(1,-1))
+            loss_frame = F.cross_entropy(logits_frame.view(1,2,-1), target.view(1,-1), frame_weights.view(1,-1))
 
             target = g.ndata['role']
             logits_role = logits_role.transpose(0,1)
-            loss_role = F.cross_entropy(logits_role.view(1,21,-1), target.view(1,-1))
+            loss_role = F.cross_entropy(logits_role.view(1,21,-1), target.view(1,-1), role_weights.view(1,-1))
 
             # add the two losses
             loss = loss_role + loss_frame
