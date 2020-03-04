@@ -42,10 +42,19 @@ class GraphDataset(ConlluDataset):
 
         # add edges
         for token in sentence:
+            # word -> word (self edge)
+            g.add_edges(wid_to_nid[token.ID], wid_to_nid[token.ID], {
+                'v': torch.tensor([0])
+                })
             # TODO: tokens with ID's like '38.1' don't have a head.
             if token.HEAD != '0' and token.HEAD != '_':
+                # word -> head
                 g.add_edges(wid_to_nid[token.ID], wid_to_nid[token.HEAD], {
-                    'v': token.DEPREL 
+                    'v': torch.tensor([1])
+                    })
+                # head -> word
+                g.add_edges(wid_to_nid[token.HEAD], wid_to_nid[token.ID], {
+                    'v': torch.tensor([2])
                     })
 
         return g
