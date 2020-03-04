@@ -13,7 +13,10 @@ import dgl.function as fn
 
 from stroll.graph import GraphDataset, draw_graph
 from stroll.model import Net
-from stroll.labels import BertEncoder
+from stroll.labels import BertEncoder, FRAMES, ROLES
+
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 torch.manual_seed(43)
 
@@ -114,11 +117,14 @@ if __name__ == '__main__':
                         )
                      )
 
-                grid = torchvision.utils.make_grid([torch.from_numpy(conf1)])
-                writer.add_image('confusion_matrix-Frame', grid, word_count)
+                figure = plt.figure()
+                sns.heatmap(conf1, annot=True, cbar=False, cmap="Greens", xticklabels=FRAMES, yticklabels=FRAMES)
+                writer.add_figure('confusion_matrix-Frame', figure, word_count)
 
-                grid = torchvision.utils.make_grid([torch.from_numpy(conf2)])
-                writer.add_image('confusion_matrix-Role', grid, word_count)
+                figure = plt.figure()
+                sns.heatmap(conf2, annot=True, cbar=False, cmap="Greens", xticklabels=ROLES, yticklabels=ROLES)
+                writer.add_figure('confusion_matrix-Role', figure, word_count)
+
 
                 writer.add_scalar('training loss', loss.item(), word_count)
                 writer.add_scalar('accuracy_frame', acc1, word_count)
