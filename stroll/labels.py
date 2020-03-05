@@ -7,6 +7,21 @@ UPOS = [
         'NUM', 'PRON', 'PROPN', 'PUNCT', 'SCONJ', 'SYM', 'VERB', 'X'
         ]
 
+XPOS = [
+        '_', '1', '2', '2b', '2v', '3', '3m', '3o', '3p', '3v', 'aanw', 'ADJ',
+        'adv-pron', 'afgebr', 'afk', 'agr', 'basis', 'bep', 'betr', 'bez',
+        'bijz', 'BW', 'comp', 'conj', 'dat', 'deeleigen', 'det', 'dim',
+        'eigen', 'enof', 'ev', 'evf', 'evmo', 'evon', 'evz', 'excl', 'fem',
+        'fin', 'gen', 'genus', 'getal', 'grad', 'hoofd', 'inf', 'init',
+        'LET', 'LID', 'masc', 'meta', 'met-e', 'met-s', 'met-t', 'mv',
+        'mv-n', 'N', 'nadr', 'neven', 'nom', 'nomin', 'obl', 'od', 'onbep',
+        'onder', 'onz', 'pers', 'persoon', 'postnom', 'pr', 'prenom',
+        'pron', 'pv', 'rang', 'recip', 'red', 'refl', 'rest', 'rest3',
+        'soort', 'SPEC', 'stan', 'sup', 'symb', 'tgw', 'TSW', 'TW', 'vb',
+        'vd', 'verl', 'versm', 'VG', 'VNW', 'vol', 'vreemd', 'vrij', 'VZ',
+        'WW', 'zijd', 'zonder', 'zonder-n'
+        ]
+
 DEPREL = [
         '_', 'acl', 'acl:relcl', 'advcl', 'advmod', 'amod', 'appos',
         'aux', 'aux:pass', 'case', 'cc', 'ccomp', 'compound:prt', 'conj',
@@ -30,10 +45,13 @@ ROLES = [
         'ArgM-DIR', 'ArgM-DIS', 'ArgM-EXT', 'ArgM-LOC', 'ArgM-MNR', 'ArgM-MOD',
         'ArgM-NEG', 'ArgM-PNC', 'ArgM-PRD', 'ArgM-REC', 'ArgM-STR', 'ArgM-TMP'
         ]
+ROLE_WEIGHTS = torch.tensor([2.584660556529111e-06, 5.547542438699656e-05, 3.2325844512687896e-05, 0.00014400921658986175, 0.00199203187250996, 0.0016835016835016834, 0.5, 0.0001998001998001998, 0.0006447453255963894, 0.0018248175182481751, 0.00018986140117714068, 0.0010964912280701754, 0.0001502178158329578, 0.00020699648105982198, 0.00017188037126160193, 0.00034614053305642093, 0.0005672149744753262, 0.0008756567425569177, 0.0008481764206955047, 0.2, 0.00010061374383740819])
 
 FRAMES = [ '_', 'rel' ]
+FRAME_WEIGHTS = torch.tensor([2.1981838604944596e-06, 2.7407772844378667e-05])
 
 upos_codec = LabelEncoder().fit(UPOS)
+xpos_codec = LabelEncoder().fit(XPOS)
 deprel_codec = LabelEncoder().fit(DEPREL)
 feats_codec = LabelEncoder().fit(FEATS)
 frame_codec = LabelEncoder().fit(FRAMES)

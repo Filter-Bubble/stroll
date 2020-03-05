@@ -13,7 +13,7 @@ import dgl.function as fn
 
 from stroll.graph import GraphDataset, draw_graph
 from stroll.model import Net
-from stroll.labels import BertEncoder, FRAMES, ROLES
+from stroll.labels import BertEncoder, FRAME_WEIGHTS, ROLE_WEIGHTS, frame_codec, role_codec
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -27,15 +27,16 @@ torch.manual_seed(43)
 # https://towardsdatascience.com/understanding-pytorch-with-an-example-a-step-by-step-tutorial-81fc5f8c4e8e
 # https://towardsdatascience.com/building-efficient-custom-datasets-in-pytorch-2563b946fd9f
 
-role_weights = torch.tensor([2.584660556529111e-06, 5.547542438699656e-05, 3.2325844512687896e-05, 0.00014400921658986175, 0.00199203187250996, 0.0016835016835016834, 0.5, 0.0001998001998001998, 0.0006447453255963894, 0.0018248175182481751, 0.00018986140117714068, 0.0010964912280701754, 0.0001502178158329578, 0.00020699648105982198, 0.00017188037126160193, 0.00034614053305642093, 0.0005672149744753262, 0.0008756567425569177, 0.0008481764206955047, 0.2, 0.00010061374383740819])
-frame_weights = torch.tensor([2.1981838604944596e-06, 2.7407772844378667e-05])
 
 if __name__ == '__main__':
     # Skip loading bert for now (this is a bit slow)
     # sentence_encoder = BertEncoder()
     sentence_encoder = None
 
-    sonar = GraphDataset('sonar1_fixed.conllu', sentence_encoder=sentence_encoder)
+    features = ['XPOS', 'FEATS', 'DEPREL']
+    h_dims = 64
+    sonar = GraphDataset('sonar1_fixed.conllu', sentence_encoder=sentence_encoder, features=features)
+    exp_name = 'runs/role_tanh_{}_ae_'.format(h_dims) + '_'.join(features)
     train_length = int(0.9 * len(sonar))
     test_length = len(sonar) - train_length
     train_set, test_set = random_split(sonar, [train_length, test_length])
@@ -48,6 +49,7 @@ if __name__ == '__main__':
     # ROLE := 21
     # FRAME := 2
     net = Net(in_feats=sonar.in_feats, h_dims=16, out_feats_a=2, out_feats_b=21)
+    net = Net(in_feats=sonar.in_feats, h_dims=h_dims, out_feats_a=2, out_feats_b=21)
     print(net)
 
     def sigterm_handler(_signo, _stack_frame):
@@ -71,6 +73,7 @@ if __name__ == '__main__':
     # Log settings
     # default `log_dir` is "runs" - we'll be more specific here
     writer = SummaryWriter('runs/experiment1')
+    writer = SummaryWriter(exp_name)
 
     # diagnostic settings
     word_count = 0
@@ -120,14 +123,16 @@ if __name__ == '__main__':
                         )
                      )
 
-                figure = plt.figure()
-                sns.heatmap(conf1, annot=True, cbar=False, cmap="Greens", xticklabels=FRAMES, yticklabels=FRAMES)
+                figure = plt.figure(figsize=[10., 10.])
+                labels = frame_codec.classes_
+                fmt=".0f"
+                sns.heatmap(conf1, fmt=fmt, annot=True, cbar=False, cmap="Greens", xticklabels=labels, yticklabels=labels)
                 writer.add_figure('confusion_matrix-Frame', figure, word_count)
 
-                figure = plt.figure()
-                sns.heatmap(conf2, annot=True, cbar=False, cmap="Greens", xticklabels=ROLES, yticklabels=ROLES)
+                figure = plt.figure(figsize=[10., 10.])
+                labels = role_codec.classes_
+                sns.heatmap(conf2, fmt=fmt, annot=True, cbar=False, cmap="Greens", xticklabels=labels, yticklabels=labels)
                 writer.add_figure('confusion_matrix-Role', figure, word_count)
-
 
                 writer.add_scalar('training loss', loss.item(), word_count)
                 writer.add_scalar('accuracy_frame', acc1, word_count)

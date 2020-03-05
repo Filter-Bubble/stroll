@@ -1,7 +1,9 @@
 import logging
 import torch
 from torch.utils.data import Dataset
-from .labels import upos_codec, deprel_codec, feats_codec, frame_codec, role_codec, to_one_hot, to_index
+from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec, frame_codec, role_codec
+from .labels import to_one_hot, to_index
+from .labels import ROLES, FRAMES
 
 class Token():
     """A class representing a single token, ie. a word, with its annotation."""
@@ -38,7 +40,7 @@ class Token():
             # Only for debugging and interactive use, so no constraints on this format
             return "ID={}\tFORM={}\tLEMMA={}\tUPOS={}\tXPOS={}\tFEATS={}\tHEAD={}\tDEPREL={}\tDEPS={}\tMISC={}\tWVEC={}\tFRAME={}\tROLE={}".format(
                 self.ID, self.FORM, self.LEMMA, 'XX', self.XPOS, 'XX',
-                self.HEAD, 'XX', self.DEPS, self.MISC, 'XX',
+                self.HEAD, 'XX', self.DEPS, self.MISC, self.WVEC,
                 'XX', 'XX'
                 )
         else:
@@ -52,8 +54,12 @@ class Token():
     def __getitem__(self, index):
         if index == 'UPOS':
             return self.UPOS
+        elif index == 'XPOS':
+            return self.XPOS
         elif index == 'FEATS':
             return self.FEATS
+        elif index == 'DEPREL':
+            return self.DEPREL
         elif index == 'WVEC':
             return self.WVEC
         return None
@@ -64,7 +70,7 @@ class Token():
             self.FORM, #  encoded later by sentence encoder
             self.LEMMA, # not encoded
             to_one_hot(upos_codec, self.UPOS),
-            self.XPOS, #  not encoded
+            to_one_hot(xpos_codec, self.XPOS.split('|')),
             to_one_hot(feats_codec, self.FEATS.split('|')),
             self.HEAD, #  not encoded
             to_one_hot(deprel_codec, self.DEPREL),
@@ -86,6 +92,9 @@ class Sentence():
 
     def __repr__(self):
         return '# sent_id = ' + self.sent_id + '\n' + '# text = ' + self.full_text + '\n' + '\n'.join([token.__repr__() for token in self.tokens])
+
+    def __getitem__(self, index):
+        return self.tokens[index]
 
     def __iter__(self):
         for i in range(len(self.tokens)):
@@ -125,8 +134,12 @@ class ConlluDataset(Dataset):
         self.in_feats = 0
         if 'UPOS' in features:
             self.in_feats = self.in_feats + len(upos_codec.classes_)
+        if 'XPOS' in features:
+            self.in_feats = self.in_feats + len(xpos_codec.classes_)
         if 'FEATS' in features:
             self.in_feats = self.in_feats + len(feats_codec.classes_)
+        if 'DEPREL' in features:
+            self.in_feats = self.in_feats + len(deprel_codec.classes_)
         if 'WVEC' in features:
             self.in_feats = self.in_feats + 768
 
@@ -175,5 +188,25 @@ class ConlluDataset(Dataset):
     def __getitem__(self, index):
         return self.sentences[index]
 
+    def __iter__(self):
+        for i in range(len(self.sentences)):
+            yield self.tokens[i]
+
     def __len__(self):
         return len(self.sentences)
+
+    def statistics(self):
+        role_counts = {}
+        for r in ROLES:
+            role_counts[r] = 0
+
+        frame_counts = {}
+        for f in FRAMES:
+            frame_counts[f] = 0
+
+        for sentence in self.sentences:
+            for token in sentence:
+                role_counts[token.ROLE] = role_counts[token.ROLE] + 1
+                frame_counts[token.FRAME] = frame_counts[token.FRAME] + 1
+
+        return role_counts, frame_counts
