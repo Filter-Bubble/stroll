@@ -33,10 +33,14 @@ torch.manual_seed(43)
 if __name__ == '__main__':
     logging.info('Initializing sentence encoder')
     sentence_encoder = BertEncoder()
+    #sentence_encoder = None
 
+    batch_size = 50
+    learning_rate = 1e-2
     h_dims = 64
     features = ['UPOS', 'FEATS', 'DEPREL', 'WVEC']
-    exp_name = 'runs/shrink_mean_{}_ae_'.format(h_dims) + '_'.join(features)
+    exp_name = 'runs/tanhshrink_mean_{}_ae_'.format(h_dims) + '_'.join(features)
+    exp_name += '{:1.0e}_{:d}'.format(learning_rate, batch_size)
 
     train_set = GraphDataset('train.conllu', sentence_encoder=sentence_encoder, features=features)
     test_set = GraphDataset('quick.conllu', sentence_encoder=sentence_encoder, features=features)
@@ -65,9 +69,9 @@ if __name__ == '__main__':
     # Training settings
     #  * mini batch size of 50 sentences
     #  * shuffle the data on each epochs
-    trainloader = DataLoader(train_set, batch_size=50, shuffle=True, collate_fn=dgl.batch)
     #  * Adam with fixed learning rate fo 1e-3
-    optimizer = torch.optim.Adam(net.parameters(), lr=1e-2)
+    trainloader = DataLoader(train_set, batch_size=batch_size, shuffle=True, collate_fn=dgl.batch)
+    optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
     #  * 2 epochs
     num_epochs = 20
 

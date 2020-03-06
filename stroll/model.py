@@ -60,15 +60,21 @@ class RGCN(nn.Module):
         # At each edge, multiply the state h from the source node
         # with a linear weight W_(edge_type)
         def rgcn_msg(edges):
+            # n.shape 2339
+            # weight[edges.data['rel_type']].shape 2339,85,64
+            # edges.src['h'].unsqueeze(1).shape) 2339,1,85
             w = weight[edges.data['rel_type']]
+            n = edges.data['norm']
             msg = torch.bmm(edges.src['h'].unsqueeze(1), w).squeeze()
+            msg = torch.bmm(n.reshape(-1,1,1), msg.unsqueeze(1)).squeeze()
+
             return {'m': msg}
 
-        # At each node, we want the averaged messages W_(edge_type) \dot h
+        # At each node, we want the summed messages W_(edge_type) \dot h
         # form the incomming edges
-        rgcn_reduce = fn.mean(msg='m', out='h')
+        rgcn_reduce = fn.sum(msg='m', out='h')
 
-        # Apply activation to the mean(in_edges) W_(edge_type) \dot h
+        # Apply activation to the sum(in_edges) W_(edge_type) \dot h
         # TODO: add bias?
         def rgcn_apply(nodes):
             h = nodes.data['h']

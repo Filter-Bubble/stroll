@@ -44,21 +44,35 @@ class GraphDataset(ConlluDataset):
                 })
             wid_to_nid[token.ID] = len(g) - 1
 
-        # add edges
+        # add edges: word -> head
         for token in sentence:
-            # word -> word (self edge)
-            g.add_edges(wid_to_nid[token.ID], wid_to_nid[token.ID], {
-                'rel_type': torch.tensor([0])
-                })
-            # TODO: tokens with ID's like '38.1' don't have a head.
             if token.HEAD != '0' and token.HEAD != '_':
-                # word -> head
                 g.add_edges(wid_to_nid[token.ID], wid_to_nid[token.HEAD], {
                     'rel_type': torch.tensor([1])
                     })
+
+        # add 1/in_degree as a weight factor
+        for token in sentence:
+            in_edges = g.in_edges(wid_to_nid[token.ID], form='eid')
+            if len(in_edges):
+                norm = torch.ones([len(in_edges)]) * (1.0 / len(in_edges))
+                g.edges[in_edges].data['norm'] = norm
+
+        # add edges, these are self-edges, or reversed dependencies
+        # give them a weight of 1
+        norm = torch.tensor([1.0])
+        for token in sentence:
+            # word -> word (self edge)
+            g.add_edges(wid_to_nid[token.ID], wid_to_nid[token.ID], {
+                'rel_type': torch.tensor([0]),
+                'norm': norm
+                })
+            # TODO: tokens with ID's like '38.1' don't have a head.
+            if token.HEAD != '0' and token.HEAD != '_':
                 # head -> word
                 g.add_edges(wid_to_nid[token.HEAD], wid_to_nid[token.ID], {
-                    'rel_type': torch.tensor([2])
+                    'rel_type': torch.tensor([2]),
+                    'norm': norm
                     })
 
         return g
