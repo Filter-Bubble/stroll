@@ -131,9 +131,9 @@ class BertEncoder:
             try:
                 word_vectors.append(torch.mean(torch.stack(subword_tensors, dim=1), 1))
             except:
-                print (sentence)
-                print ('len subword_tensors', len(subword_tensors))
-                print (bert_i, chars_bert, gold_i, chars_gold, gold_t)
+                #print (sentence)
+                #print ('len subword_tensors', len(subword_tensors))
+                #print (bert_i, chars_bert, gold_i, chars_gold, gold_t)
                 word_vectors.append(torch.zeros([768]))
 
         return word_vectors

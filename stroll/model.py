@@ -90,12 +90,14 @@ class Net(nn.Module):
         super(Net, self).__init__()
         self.rgcn1 = RGCN(in_feats, h_dims, nn.Tanhshrink()) # F.relu)
         self.rgcn2 = RGCN(h_dims, h_dims, nn.Tanhshrink()) # F.relu)
+        self.rgcn3 = RGCN(h_dims, h_dims, nn.Tanhshrink()) # F.relu)
         self.linear1a = nn.Linear(h_dims, out_feats_a)
         self.linear1b = nn.Linear(h_dims, out_feats_b)
 
     def forward(self, g):
         x = self.rgcn1(g, g.ndata['v'])
         x = self.rgcn2(g, x)
+        x = self.rgcn3(g, x)
         xa = self.linear1a(x)
         xb = self.linear1b(x)
 

@@ -37,10 +37,10 @@ if __name__ == '__main__':
 
     batch_size = 50
     learning_rate = 1e-2
-    h_dims = 64
+    h_dims = 10
     features = ['UPOS', 'FEATS', 'DEPREL', 'WVEC']
-    exp_name = 'runs/tanhshrink_mean_{}_ae_'.format(h_dims) + '_'.join(features)
-    exp_name += '{:1.0e}_{:d}'.format(learning_rate, batch_size)
+    exp_name = 'runs/tanhshrink_wmean_{}_3l_ae_'.format(h_dims) + '_'.join(features)
+    exp_name += '_{:1.0e}_{:d}'.format(learning_rate, batch_size)
 
     train_set = GraphDataset('train.conllu', sentence_encoder=sentence_encoder, features=features)
     test_set = GraphDataset('quick.conllu', sentence_encoder=sentence_encoder, features=features)
