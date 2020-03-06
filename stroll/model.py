@@ -5,7 +5,9 @@ import torch.nn.functional as F
 import dgl.function as fn
 
 import numpy as np
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, classification_report, balanced_accuracy_score
+
+from .labels import role_codec, frame_codec
 
 class NodeApplyModule(nn.Module):
     def __init__(self, in_feats, out_feats, activation):
@@ -22,12 +24,15 @@ class NodeApplyModule(nn.Module):
 class GCN(nn.Module):
     def __init__(self, in_feats, out_feats, activation):
         super(GCN, self).__init__()
-        self.apply_mod = NodeApplyModule(in_feats, out_feats, activation)
+        self.in_feats = in_feats
+        self.out_feats = out_feats
+        self.activation = activation
+        self.apply_mod = NodeApplyModule(self.in_feats, self.out_feats, self.activation)
 
     def forward(self, g, feature):
 
         gcn_msg = fn.copy_src(src='h', out='m')
-        gcn_reduce = fn.sum(msg='m', out='h')
+        gcn_reduce = fn.mean(msg='m', out='h')
 
         g.ndata['h'] = feature
         g.update_all(gcn_msg, gcn_reduce)
@@ -35,19 +40,59 @@ class GCN(nn.Module):
         return g.ndata.pop('h')
 
 
+# https://docs.dgl.ai/en/0.4.x/tutorials/models/1_gnn/4_rgcn.html
+# simplify by setting num_bases = num_rels = 3
+class RGCN(nn.Module):
+    def __init__(self, in_feats, out_feats, activation):
+        super(RGCN, self).__init__()
+        self.in_feats = in_feats
+        self.out_feats = out_feats
+        self.activation = activation
+
+        # weight bases in equation (3)
+        self.weight = nn.Parameter(torch.Tensor(3, self.in_feats, self.out_feats))
+        nn.init.xavier_uniform_(self.weight,
+                                gain=nn.init.calculate_gain('relu'))
+
+    def forward(self, g, feature):
+        weight = self.weight
+
+        # At each edge, multiply the state h from the source node
+        # with a linear weight W_(edge_type)
+        def rgcn_msg(edges):
+            w = weight[edges.data['rel_type']]
+            msg = torch.bmm(edges.src['h'].unsqueeze(1), w).squeeze()
+            return {'m': msg}
+
+        # At each node, we want the averaged messages W_(edge_type) \dot h
+        # form the incomming edges
+        rgcn_reduce = fn.mean(msg='m', out='h')
+
+        # Apply activation to the mean(in_edges) W_(edge_type) \dot h
+        # TODO: add bias?
+        def rgcn_apply(nodes):
+            h = nodes.data['h']
+            h = self.activation(h)
+            return {'h': h}
+
+        g.ndata['h'] = feature
+        g.update_all(rgcn_msg, rgcn_reduce, rgcn_apply)
+        return g.ndata.pop('h')
+
 class Net(nn.Module):
     def __init__(self, in_feats=16, h_dims=16, out_feats_a=2, out_feats_b=16):
         super(Net, self).__init__()
-        self.gcn1 = GCN(in_feats, h_dims, F.relu)
-        self.gcn2 = GCN(h_dims, h_dims, F.relu)
+        self.rgcn1 = RGCN(in_feats, h_dims, nn.Tanhshrink()) # F.relu)
+        self.rgcn2 = RGCN(h_dims, h_dims, nn.Tanhshrink()) # F.relu)
         self.linear1a = nn.Linear(h_dims, out_feats_a)
         self.linear1b = nn.Linear(h_dims, out_feats_b)
 
     def forward(self, g):
-        x = self.gcn1(g, g.ndata['v'])
-        x = self.gcn2(g, x)
+        x = self.rgcn1(g, g.ndata['v'])
+        x = self.rgcn2(g, x)
         xa = self.linear1a(x)
         xb = self.linear1b(x)
+
         return xa, xb
 
     def evaluate(self, g):
@@ -61,13 +106,19 @@ class Net(nn.Module):
             targets_a = g.ndata['frame']
             targets_b = g.ndata['role']
 
-            correct_a = torch.sum(pred_a == targets_a)
-            correct_b = torch.sum(pred_b == targets_b)
+            acc_a = balanced_accuracy_score(targets_a, pred_a)
+            acc_b = balanced_accuracy_score(targets_b, pred_b)
 
-            acc_a = correct_a.item() * 1.0 / len(targets_a)
-            acc_b = correct_b.item() * 1.0 / len(targets_b)
+            pred_frames = frame_codec.inverse_transform(pred_a)
+            target_frames = frame_codec.inverse_transform(targets_a)
+            print (classification_report(target_frames, pred_frames))
 
-            conf_a = confusion_matrix(pred_a, targets_a, labels=np.arange(2))
-            conf_b = confusion_matrix(pred_b, targets_b, labels=np.arange(21))
+            pred_roles = role_codec.inverse_transform(pred_b)
+            target_roles = role_codec.inverse_transform(targets_b)
+            print (classification_report(target_roles, pred_roles))
+
+            normalize = None # 'true': normalize wrt. the true label count
+            conf_a = confusion_matrix(pred_a, targets_a, normalize=normalize, labels=np.arange(2))
+            conf_b = confusion_matrix(pred_b, targets_b, normalize=normalize, labels=np.arange(21))
 
             return  acc_a, acc_b, conf_a, conf_b

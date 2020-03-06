@@ -190,7 +190,7 @@ class ConlluDataset(Dataset):
 
     def __iter__(self):
         for i in range(len(self.sentences)):
-            yield self.tokens[i]
+            yield self.sentences[i]
 
     def __len__(self):
         return len(self.sentences)

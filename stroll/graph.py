@@ -22,6 +22,10 @@ class GraphDataset(ConlluDataset):
     def __init__(self, filename, features=['UPOS'], sentence_encoder=None):
         super().__init__(filename, features)
         self.sentence_encoder = sentence_encoder
+
+    def __iter__(self):
+        for i in range(len(self.sentences)):
+            yield self[i]
         
     def __getitem__(self, index):
         sentence = super().__getitem__(index).encode(sentence_encoder=self.sentence_encoder)
@@ -44,17 +48,17 @@ class GraphDataset(ConlluDataset):
         for token in sentence:
             # word -> word (self edge)
             g.add_edges(wid_to_nid[token.ID], wid_to_nid[token.ID], {
-                'v': torch.tensor([0])
+                'rel_type': torch.tensor([0])
                 })
             # TODO: tokens with ID's like '38.1' don't have a head.
             if token.HEAD != '0' and token.HEAD != '_':
                 # word -> head
                 g.add_edges(wid_to_nid[token.ID], wid_to_nid[token.HEAD], {
-                    'v': torch.tensor([1])
+                    'rel_type': torch.tensor([1])
                     })
                 # head -> word
                 g.add_edges(wid_to_nid[token.HEAD], wid_to_nid[token.ID], {
-                    'v': torch.tensor([2])
+                    'rel_type': torch.tensor([2])
                     })
 
         return g

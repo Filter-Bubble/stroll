@@ -1,12 +1,11 @@
 import time
 import signal
+
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, random_split
 
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-
-import torchvision
 
 import dgl
 import dgl.function as fn
@@ -17,6 +16,9 @@ from stroll.labels import BertEncoder, FRAME_WEIGHTS, ROLE_WEIGHTS, frame_codec,
 
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+import logging
+logging.basicConfig(level=logging.WARNING)
 
 torch.manual_seed(43)
 
@@ -29,27 +31,25 @@ torch.manual_seed(43)
 
 
 if __name__ == '__main__':
-    # Skip loading bert for now (this is a bit slow)
-    # sentence_encoder = BertEncoder()
-    sentence_encoder = None
+    logging.info('Initializing sentence encoder')
+    sentence_encoder = BertEncoder()
 
-    features = ['XPOS', 'FEATS', 'DEPREL']
     h_dims = 64
-    sonar = GraphDataset('sonar1_fixed.conllu', sentence_encoder=sentence_encoder, features=features)
-    exp_name = 'runs/role_tanh_{}_ae_'.format(h_dims) + '_'.join(features)
-    train_length = int(0.9 * len(sonar))
-    test_length = len(sonar) - train_length
-    train_set, test_set = random_split(sonar, [train_length, test_length])
+    features = ['UPOS', 'FEATS', 'DEPREL', 'WVEC']
+    exp_name = 'runs/shrink_mean_{}_ae_'.format(h_dims) + '_'.join(features)
 
-    # Test setings
+    train_set = GraphDataset('train.conllu', sentence_encoder=sentence_encoder, features=features)
+    test_set = GraphDataset('quick.conllu', sentence_encoder=sentence_encoder, features=features)
+
+    logging.info('Building test graph')
     test_graph = dgl.batch([g for g in test_set])
-    print ('Test set contains {} words.'.format(len(test_graph)))
+
     # Create network
     # out_feats:
     # ROLE := 21
     # FRAME := 2
-    net = Net(in_feats=sonar.in_feats, h_dims=16, out_feats_a=2, out_feats_b=21)
-    net = Net(in_feats=sonar.in_feats, h_dims=h_dims, out_feats_a=2, out_feats_b=21)
+    logging.info('Building model')
+    net = Net(in_feats=train_set.in_feats, h_dims=h_dims, out_feats_a=2, out_feats_b=21)
     print(net)
 
     def sigterm_handler(_signo, _stack_frame):
@@ -61,26 +61,26 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, sigterm_handler)
     signal.signal(signal.SIGINT, sigterm_handler)
 
+
     # Training settings
-    #  * mini batch size of 10 sentences
+    #  * mini batch size of 50 sentences
     #  * shuffle the data on each epochs
-    trainloader = DataLoader(train_set, batch_size=10, shuffle=True, collate_fn=dgl.batch)
+    trainloader = DataLoader(train_set, batch_size=50, shuffle=True, collate_fn=dgl.batch)
     #  * Adam with fixed learning rate fo 1e-3
-    optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(net.parameters(), lr=1e-2)
     #  * 2 epochs
-    num_epochs = 2
+    num_epochs = 20
 
     # Log settings
-    # default `log_dir` is "runs" - we'll be more specific here
-    writer = SummaryWriter('runs/experiment1')
     writer = SummaryWriter(exp_name)
 
     # diagnostic settings
     word_count = 0
-    count_per_eval = 1000
+    count_per_eval = 5000
     next_eval = count_per_eval
     t0 = time.time()
 
+    logging.info('Start training')
     # loop over the epochs
     for epoch in range(num_epochs):
         # loop over each minibatch
@@ -96,14 +96,20 @@ if __name__ == '__main__':
 
             target = g.ndata['frame']
             logits_frame = logits_frame.transpose(0,1)
-            loss_frame = F.cross_entropy(logits_frame.view(1,2,-1), target.view(1,-1), frame_weights.view(1,-1))
+            loss_frame = F.cross_entropy(
+                    logits_frame.view(1,2,-1),
+                    target.view(1,-1),
+                    FRAME_WEIGHTS.view(1,-1))
 
             target = g.ndata['role']
             logits_role = logits_role.transpose(0,1)
-            loss_role = F.cross_entropy(logits_role.view(1,21,-1), target.view(1,-1), role_weights.view(1,-1))
+            loss_role = F.cross_entropy(
+                    logits_role.view(1,21,-1),
+                    target.view(1,-1),
+                    ROLE_WEIGHTS.view(1,-1))
 
             # add the two losses
-            loss = loss_role + loss_frame
+            loss = 10. * loss_role + loss_frame
 
             # apply loss
             optimizer.zero_grad()
@@ -114,12 +120,10 @@ if __name__ == '__main__':
             word_count = word_count + len(g)
 
             if word_count > next_eval:
-                # draw_graph(g)
-
                 dur = time.time() - t0
                 acc1, acc2, conf1, conf2 = net.evaluate(test_graph)
-                print("Elements {:08d} | Loss {:.4f} | Acc1 {:.4f} | Acc2 {:.4f} | words/sec {:4.3f}".format(
-                        word_count, loss.item(), acc1, acc2, len(g) / dur
+                print("Elements {:08d} | LossA {:.4f} | LossB {:.4f} | Acc1 {:.4f} | Acc2 {:.4f} | words/sec {:4.3f}".format(
+                        word_count, loss_role.item(), loss_frame.item(), acc1, acc2, len(g) / dur
                         )
                      )
 
@@ -134,7 +138,9 @@ if __name__ == '__main__':
                 sns.heatmap(conf2, fmt=fmt, annot=True, cbar=False, cmap="Greens", xticklabels=labels, yticklabels=labels)
                 writer.add_figure('confusion_matrix-Role', figure, word_count)
 
-                writer.add_scalar('training loss', loss.item(), word_count)
+                writer.add_scalar('loss_frame', loss_frame.item(), word_count)
+                writer.add_scalar('loss_role', loss_role.item(), word_count)
+                writer.add_scalar('loss_total', loss.item(), word_count)
                 writer.add_scalar('accuracy_frame', acc1, word_count)
                 writer.add_scalar('accuracy_role', acc2, word_count)
 
@@ -147,6 +153,7 @@ if __name__ == '__main__':
                 t0 = time.time()
 
         print ('Epoch {} done'.format(epoch))
+        torch.save(net.state_dict(), './model_{}.pt'.format(epoch))
 
     torch.save(net.state_dict(), './model.pt')
     writer.close()

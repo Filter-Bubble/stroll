@@ -45,10 +45,14 @@ ROLES = [
         'ArgM-DIR', 'ArgM-DIS', 'ArgM-EXT', 'ArgM-LOC', 'ArgM-MNR', 'ArgM-MOD',
         'ArgM-NEG', 'ArgM-PNC', 'ArgM-PRD', 'ArgM-REC', 'ArgM-STR', 'ArgM-TMP'
         ]
-ROLE_WEIGHTS = torch.tensor([2.584660556529111e-06, 5.547542438699656e-05, 3.2325844512687896e-05, 0.00014400921658986175, 0.00199203187250996, 0.0016835016835016834, 0.5, 0.0001998001998001998, 0.0006447453255963894, 0.0018248175182481751, 0.00018986140117714068, 0.0010964912280701754, 0.0001502178158329578, 0.00020699648105982198, 0.00017188037126160193, 0.00034614053305642093, 0.0005672149744753262, 0.0008756567425569177, 0.0008481764206955047, 0.2, 0.00010061374383740819])
+ROLE_WEIGHTS = torch.tensor([
+    1e-4,
+    2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
+    0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5
+    ])
 
 FRAMES = [ '_', 'rel' ]
-FRAME_WEIGHTS = torch.tensor([2.1981838604944596e-06, 2.7407772844378667e-05])
+FRAME_WEIGHTS = torch.tensor([1.0, 10.0])
 
 upos_codec = LabelEncoder().fit(UPOS)
 xpos_codec = LabelEncoder().fit(XPOS)
@@ -124,6 +128,12 @@ class BertEncoder:
                 bert_i = bert_i + 1
 
             # average and append to OUtput
-            word_vectors.append(torch.mean(torch.stack(subword_tensors, dim=1), 1))
+            try:
+                word_vectors.append(torch.mean(torch.stack(subword_tensors, dim=1), 1))
+            except:
+                print (sentence)
+                print ('len subword_tensors', len(subword_tensors))
+                print (bert_i, chars_bert, gold_i, chars_gold, gold_t)
+                word_vectors.append(torch.zeros([768]))
 
         return word_vectors
