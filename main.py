@@ -37,9 +37,9 @@ if __name__ == '__main__':
 
     batch_size = 50
     learning_rate = 1e-2
-    h_dims = 10
+    h_dims = 64
     features = ['UPOS', 'FEATS', 'DEPREL', 'WVEC']
-    exp_name = 'runs/tanhshrink_wmean_{}_3l_ae_'.format(h_dims) + '_'.join(features)
+    exp_name = 'runs/relu_wmean_skip2_{}_3l_ae_'.format(h_dims) + '_'.join(features)
     exp_name += '_{:1.0e}_{:d}'.format(learning_rate, batch_size)
 
     train_set = GraphDataset('train.conllu', sentence_encoder=sentence_encoder, features=features)
@@ -113,7 +113,7 @@ if __name__ == '__main__':
                     ROLE_WEIGHTS.view(1,-1))
 
             # add the two losses
-            loss = 10. * loss_role + loss_frame
+            loss = loss_role + 5. * loss_frame
 
             # apply loss
             optimizer.zero_grad()

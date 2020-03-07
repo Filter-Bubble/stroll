@@ -88,16 +88,21 @@ class RGCN(nn.Module):
 class Net(nn.Module):
     def __init__(self, in_feats=16, h_dims=16, out_feats_a=2, out_feats_b=16):
         super(Net, self).__init__()
-        self.rgcn1 = RGCN(in_feats, h_dims, nn.Tanhshrink()) # F.relu)
-        self.rgcn2 = RGCN(h_dims, h_dims, nn.Tanhshrink()) # F.relu)
-        self.rgcn3 = RGCN(h_dims, h_dims, nn.Tanhshrink()) # F.relu)
+        self.rgcn1 = RGCN(in_feats, h_dims, F.relu)
+        self.rgcn2 = RGCN(h_dims, h_dims, F.relu)
+        self.rgcn3 = RGCN(h_dims, h_dims, F.relu)
         self.linear1a = nn.Linear(h_dims, out_feats_a)
         self.linear1b = nn.Linear(h_dims, out_feats_b)
 
     def forward(self, g):
+        # Add a skip connection around layer 2:
+        #
+        #    RGCN1 -> RGCN2 -> RGCN3 -> Linear
+        #          |         |
+        #          ----------
         x = self.rgcn1(g, g.ndata['v'])
-        x = self.rgcn2(g, x)
-        x = self.rgcn3(g, x)
+        xskipped = self.rgcn2(g, x)
+        x = self.rgcn3(g, x + xskipped)
         xa = self.linear1a(x)
         xb = self.linear1b(x)
 
