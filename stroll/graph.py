@@ -51,16 +51,16 @@ class GraphDataset(ConlluDataset):
                     'rel_type': torch.tensor([1])
                     })
 
-        # add 1/in_degree as a weight factor
+        # add 1/(3 * in_degree) as a weight factor
         for token in sentence:
             in_edges = g.in_edges(wid_to_nid[token.ID], form='eid')
             if len(in_edges):
-                norm = torch.ones([len(in_edges)]) * (1.0 / len(in_edges))
+                norm = torch.ones([len(in_edges)]) * (1.0 / (3.0 * len(in_edges)))
                 g.edges[in_edges].data['norm'] = norm
 
         # add edges, these are self-edges, or reversed dependencies
-        # give them a weight of 1
-        norm = torch.tensor([1.0])
+        # give them a weight of 1/3
+        norm = torch.tensor([1.0 / 3.0])
         for token in sentence:
             # word -> word (self edge)
             g.add_edges(wid_to_nid[token.ID], wid_to_nid[token.ID], {

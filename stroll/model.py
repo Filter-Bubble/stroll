@@ -43,16 +43,17 @@ class GCN(nn.Module):
 # https://docs.dgl.ai/en/0.4.x/tutorials/models/1_gnn/4_rgcn.html
 # simplify by setting num_bases = num_rels = 3
 class RGCN(nn.Module):
-    def __init__(self, in_feats, out_feats, activation):
+    def __init__(self, in_feats, out_feats, activation, skip=False):
         super(RGCN, self).__init__()
         self.in_feats = in_feats
         self.out_feats = out_feats
         self.activation = activation
+        self.skip = skip
 
         # weight bases in equation (3)
         self.weight = nn.Parameter(torch.Tensor(3, self.in_feats, self.out_feats))
-        nn.init.xavier_uniform_(self.weight,
-                                gain=nn.init.calculate_gain('relu'))
+        # nn.init.xavier_uniform_(self.weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.kaiming_uniform_(self.weight, mode='fan_in', nonlinearity='relu')
 
     def forward(self, g, feature):
         weight = self.weight
@@ -71,14 +72,23 @@ class RGCN(nn.Module):
             return {'m': msg}
 
         # At each node, we want the summed messages W_(edge_type) \dot h
-        # form the incomming edges
-        rgcn_reduce = fn.sum(msg='m', out='h')
+        # from the incomming edges
+
+        # Add a skip connection around the (\sum W h)
+        if self.skip:
+            rgcn_reduce = fn.sum(msg='m', out='Swh')
+        else:
+            rgcn_reduce = fn.sum(msg='m', out='h')
 
         # Apply activation to the sum(in_edges) W_(edge_type) \dot h
         # TODO: add bias?
         def rgcn_apply(nodes):
             h = nodes.data['h']
-            h = self.activation(h)
+            if self.skip:
+                Swh = nodes.data['Swh']
+                h = self.activation(h + Swh)
+            else:
+                h = self.activation(h)
             return {'h': h}
 
         g.ndata['h'] = feature
@@ -88,21 +98,20 @@ class RGCN(nn.Module):
 class Net(nn.Module):
     def __init__(self, in_feats=16, h_dims=16, out_feats_a=2, out_feats_b=16):
         super(Net, self).__init__()
-        self.rgcn1 = RGCN(in_feats, h_dims, F.relu)
-        self.rgcn2 = RGCN(h_dims, h_dims, F.relu)
-        self.rgcn3 = RGCN(h_dims, h_dims, F.relu)
+        self.rgcn1 = RGCN(in_feats, h_dims, F.relu, skip=False)
+        self.rgcn2 = RGCN(h_dims, h_dims, F.relu, skip=True)
+        self.rgcn3 = RGCN(h_dims, h_dims, F.relu, skip=True)
         self.linear1a = nn.Linear(h_dims, out_feats_a)
         self.linear1b = nn.Linear(h_dims, out_feats_b)
 
+        nn.init.xavier_uniform_(self.linear1a.weight, nn.init.calculate_gain('sigmoid'))
+        nn.init.xavier_uniform_(self.linear1b.weight, nn.init.calculate_gain('sigmoid'))
+
     def forward(self, g):
-        # Add a skip connection around layer 2:
-        #
         #    RGCN1 -> RGCN2 -> RGCN3 -> Linear
-        #          |         |
-        #          ----------
         x = self.rgcn1(g, g.ndata['v'])
-        xskipped = self.rgcn2(g, x)
-        x = self.rgcn3(g, x + xskipped)
+        x = self.rgcn2(g, x)
+        x = self.rgcn3(g, x)
         xa = self.linear1a(x)
         xb = self.linear1b(x)
 
