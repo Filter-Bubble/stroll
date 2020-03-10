@@ -13,6 +13,7 @@ import dgl.function as fn
 from stroll.graph import GraphDataset, draw_graph
 from stroll.model import Net
 from stroll.labels import BertEncoder, FRAME_WEIGHTS, ROLE_WEIGHTS, frame_codec, role_codec
+from stroll.focalloss import FocalLoss
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -38,9 +39,10 @@ if __name__ == '__main__':
     batch_size = 50
     learning_rate = 1e-2
     h_dims = 64
+    loss_function = 'FL'
     features = ['UPOS', 'FEATS', 'DEPREL', 'WVEC']
-    exp_name = 'runs/sgd2_step_'.format(h_dims) + '_'.join(features)
-    exp_name += '_{:1.0e}_{:d}'.format(learning_rate, batch_size)
+    exp_name = 'runs/sgd_'.format(h_dims) + '_'.join(features)
+    exp_name += '_{:1.0e}_{:d}_{}'.format(learning_rate, batch_size, loss_function)
 
     train_set = GraphDataset('train.conllu', sentence_encoder=sentence_encoder, features=features)
     test_set = GraphDataset('quick.conllu', sentence_encoder=sentence_encoder, features=features)
@@ -54,9 +56,19 @@ if __name__ == '__main__':
     # FRAME := 2
     logging.info('Building model')
     net = Net(in_feats=train_set.in_feats, h_dims=h_dims, out_feats_a=2, out_feats_b=21)
-    optimizer = torch.optim.SGD(net.parameters(), lr=learning_rate, momentum=0.9,nesterov=True)
+    #optimizer = torch.optim.SGD(net.parameters(), lr=learning_rate, momentum=0.9,nesterov=True)
+    optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.9)
-    # optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
+    if loss_function == 'FL':
+        print ('Using FocalLoss loss function.')
+        focal_frame_loss = FocalLoss(gamma=2., alpha=FRAME_WEIGHTS.view(-1), size_average=True)
+        focal_role_loss = FocalLoss(gamma=2., alpha=ROLE_WEIGHTS.view(-1), size_average=True)
+    elif loss_funcion == 'CE':
+        print ('Using cross entropy loss function')
+    else:
+        print ('Unknown loss function "{}", using cross entropy'.format(loss_function))
+        loss_function = 'CE'
+
     print(net)
     try:
         net.load_state_dict(torch.load('restart.pt'))
@@ -105,19 +117,28 @@ if __name__ == '__main__':
             # d_x       = extra dimensions
             logits_frame, logits_role = net(g)
 
-            target = g.ndata['frame']
-            logits_frame = logits_frame.transpose(0,1)
-            loss_frame = F.cross_entropy(
-                    logits_frame.view(1,2,-1),
-                    target.view(1,-1),
-                    FRAME_WEIGHTS.view(1,-1))
+            if loss_function == 'CE':
+                target = g.ndata['frame']
+                logits_frame = logits_frame.transpose(0,1)
+                loss_frame = F.cross_entropy(
+                        logits_frame.view(1,2,-1),
+                        target.view(1,-1),
+                        FRAME_WEIGHTS.view(1,-1))
 
-            target = g.ndata['role']
-            logits_role = logits_role.transpose(0,1)
-            loss_role = F.cross_entropy(
-                    logits_role.view(1,21,-1),
-                    target.view(1,-1),
-                    ROLE_WEIGHTS.view(1,-1))
+                target = g.ndata['role']
+                logits_role = logits_role.transpose(0,1)
+                loss_role = F.cross_entropy(
+                        logits_role.view(1,21,-1),
+                        target.view(1,-1),
+                        ROLE_WEIGHTS.view(1,-1))
+            elif loss_function == 'FL':
+                target = g.ndata['frame'].view(-1)
+                logits_frame = logits_frame.transpose(0,1)
+                loss_frame = focal_frame_loss(logits_frame.view(2,-1),target)
+
+                target = g.ndata['role'].view(-1)
+                logits_role = logits_role.transpose(0,1)
+                loss_role = focal_role_loss(logits_role.view(21,-1), target)
 
             # add the two losses
             loss = torch.exp(-1. * net.loss_weight1) * loss_role + 0.5 * net.loss_weight1
