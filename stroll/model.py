@@ -104,6 +104,9 @@ class Net(nn.Module):
         self.linear1a = nn.Linear(h_dims, out_feats_a)
         self.linear1b = nn.Linear(h_dims, out_feats_b)
 
+        self.loss_weight1 = torch.nn.Parameter(torch.tensor([0.25]))
+        self.loss_weight2 = torch.nn.Parameter(torch.tensor([3.]))
+
         nn.init.xavier_uniform_(self.linear1a.weight, nn.init.calculate_gain('sigmoid'))
         nn.init.xavier_uniform_(self.linear1b.weight, nn.init.calculate_gain('sigmoid'))
 

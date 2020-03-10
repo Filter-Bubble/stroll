@@ -39,7 +39,7 @@ if __name__ == '__main__':
     learning_rate = 1e-2
     h_dims = 64
     features = ['UPOS', 'FEATS', 'DEPREL', 'WVEC']
-    exp_name = 'runs/relu_wmean_skip2_{}_3l_ae_'.format(h_dims) + '_'.join(features)
+    exp_name = 'runs/sgd2_step_'.format(h_dims) + '_'.join(features)
     exp_name += '_{:1.0e}_{:d}'.format(learning_rate, batch_size)
 
     train_set = GraphDataset('train.conllu', sentence_encoder=sentence_encoder, features=features)
@@ -54,7 +54,15 @@ if __name__ == '__main__':
     # FRAME := 2
     logging.info('Building model')
     net = Net(in_feats=train_set.in_feats, h_dims=h_dims, out_feats_a=2, out_feats_b=21)
+    optimizer = torch.optim.SGD(net.parameters(), lr=learning_rate, momentum=0.9,nesterov=True)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.9)
+    # optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
     print(net)
+    try:
+        net.load_state_dict(torch.load('restart.pt'))
+        print ('Restarting from previously saved model.')
+    except:
+        print ('Restart failed.')
 
     def sigterm_handler(_signo, _stack_frame):
         print('Aborting')
@@ -71,7 +79,6 @@ if __name__ == '__main__':
     #  * shuffle the data on each epochs
     #  * Adam with fixed learning rate fo 1e-3
     trainloader = DataLoader(train_set, batch_size=batch_size, shuffle=True, collate_fn=dgl.batch)
-    optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
     #  * 2 epochs
     num_epochs = 20
 
@@ -113,7 +120,8 @@ if __name__ == '__main__':
                     ROLE_WEIGHTS.view(1,-1))
 
             # add the two losses
-            loss = loss_role + 5. * loss_frame
+            loss = torch.exp(-1. * net.loss_weight1) * loss_role + 0.5 * net.loss_weight1
+            loss += torch.exp(-1. * net.loss_weight2) * loss_frame + 0.5 * net.loss_weight2
 
             # apply loss
             optimizer.zero_grad()
@@ -148,6 +156,11 @@ if __name__ == '__main__':
                 writer.add_scalar('accuracy_frame', acc1, word_count)
                 writer.add_scalar('accuracy_role', acc2, word_count)
 
+                writer.add_scalar('loss_weight1', torch.exp(-1. * net.loss_weight1), word_count)
+                writer.add_scalar('loss_weight2', torch.exp(-1. * net.loss_weight2), word_count)
+
+                writer.add_scalar('learning_rate', optimizer.param_groups[0]['lr'], word_count)
+
                 for name, param in net.state_dict().items():
                      writer.add_histogram('hist_' + name, param, word_count)
                      writer.add_scalar('norm_' + name, torch.norm(param), word_count)
@@ -158,6 +171,7 @@ if __name__ == '__main__':
 
         print ('Epoch {} done'.format(epoch))
         torch.save(net.state_dict(), './model_{}.pt'.format(epoch))
+        scheduler.step()
 
     torch.save(net.state_dict(), './model.pt')
     writer.close()
