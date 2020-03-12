@@ -31,12 +31,14 @@ DEPREL = [
         ]
 
 FEATS = [
-        '_', 'Abbr=Yes', 'Case=Acc', 'Case=Dat', 'Case=Gen', 'Case=Nom', 'Definite=Def',
-        'Definite=Ind', 'Degree=Cmp', 'Degree=Pos', 'Degree=Sup', 'Foreign=Yes',
-        'Gender=Com', 'Gender=Com,Neut', 'Gender=Neut', 'Number=Plur', 'Number=Sing',
-        'Person=1', 'Person=2', 'Person=3', 'PronType=Dem', 'PronType=Ind', 'PronType=Int',
-        'PronType=Prs', 'PronType=Rcp', 'PronType=Rel', 'Reflex=Yes', 'Tense=Past',
-        'Tense=Pres', 'VerbForm=Fin', 'VerbForm=Inf', 'VerbForm=Part'
+        '_', 'Abbr=Yes', 'Case=Acc', 'Case=Dat', 'Case=Gen', 'Case=Nom',
+        'Definite=Def', 'Definite=Ind', 'Degree=Cmp', 'Degree=Pos',
+        'Degree=Sup', 'Foreign=Yes', 'Gender=Com', 'Gender=Com,Neut',
+        'Gender=Neut', 'Number=Plur', 'Number=Sing', 'Person=1', 'Person=2',
+        'Person=3', 'PronType=Dem', 'PronType=Ind', 'PronType=Int',
+        'PronType=Prs', 'PronType=Rcp', 'PronType=Rel', 'Reflex=Yes',
+        'Tense=Past', 'Tense=Pres', 'VerbForm=Fin', 'VerbForm=Inf',
+        'VerbForm=Part'
         ]
 
 ROLES = [
@@ -45,13 +47,14 @@ ROLES = [
         'ArgM-DIR', 'ArgM-DIS', 'ArgM-EXT', 'ArgM-LOC', 'ArgM-MNR', 'ArgM-MOD',
         'ArgM-NEG', 'ArgM-PNC', 'ArgM-PRD', 'ArgM-REC', 'ArgM-STR', 'ArgM-TMP'
         ]
+
 ROLE_WEIGHTS = torch.tensor([
     1e-4,
     2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
     0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5
     ])
 
-FRAMES = [ '_', 'rel' ]
+FRAMES = ['_', 'rel']
 FRAME_WEIGHTS = torch.tensor([1.0, 10.0])
 
 upos_codec = LabelEncoder().fit(UPOS)
@@ -61,6 +64,7 @@ feats_codec = LabelEncoder().fit(FEATS)
 frame_codec = LabelEncoder().fit(FRAMES)
 role_codec = LabelEncoder().fit(ROLES)
 
+
 def to_one_hot(codec, values):
     if type(values) == type([]):
         value_idxs = codec.transform(values)
@@ -68,6 +72,7 @@ def to_one_hot(codec, values):
     else:
         value_idxs = codec.transform([values])
         return torch.eye(len(codec.classes_))[value_idxs].flatten()
+
 
 def to_index(codec, values):
     return torch.tensor(codec.transform([values])).flatten()
@@ -94,7 +99,8 @@ class BertEncoder:
         tokens_tensor = torch.tensor([indexed_tokens])
 
         with torch.no_grad():
-            # torch tensor of shape (batch_size=1, sequence_length, hidden_size=768)
+            # torch tensor of shape
+            # (batch_size=1, sequence_length, hidden_size=768)
             bert_output, _ = self.model(tokens_tensor)
 
         # Realign the tokens and build the word vectors by averaging
@@ -129,11 +135,13 @@ class BertEncoder:
 
             # average and append to OUtput
             try:
-                word_vectors.append(torch.mean(torch.stack(subword_tensors, dim=1), 1))
+                word_vectors.append(
+                        torch.mean(torch.stack(subword_tensors, dim=1), 1)
+                        )
             except:
-                #print (sentence)
-                #print ('len subword_tensors', len(subword_tensors))
-                #print (bert_i, chars_bert, gold_i, chars_gold, gold_t)
+                # print (sentence)
+                # print ('len subword_tensors', len(subword_tensors))
+                # print (bert_i, chars_bert, gold_i, chars_gold, gold_t)
                 word_vectors.append(torch.zeros([768]))
 
         return word_vectors
