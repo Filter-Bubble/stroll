@@ -1,16 +1,19 @@
 import logging
-import torch
 from torch.utils.data import Dataset
-from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec, frame_codec, role_codec
+from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec, \
+        frame_codec, role_codec
 from .labels import to_one_hot, to_index
 from .labels import ROLES, FRAMES
+
 
 class Token():
     """A class representing a single token, ie. a word, with its annotation."""
     def __init__(self, fields, isEncoded=False):
         self.isEncoded = isEncoded
         if len(fields) < 10:
-            logging.warn('Incorrect number of fields in sentence: {} "{}"'.format(len(fields), line))
+            logging.warn(
+               'Incorrect number of fields in sentence: {}'.format(len(fields))
+               )
         else:
             self.ID = fields[0]
             self.FORM = fields[1]
@@ -37,7 +40,8 @@ class Token():
 
     def __repr__(self):
         if self.isEncoded:
-            # Only for debugging and interactive use, so no constraints on this format
+            # Only for debugging and interactive use,
+            # so no constraints on this format
             return "ID={}\tFORM={}\tLEMMA={}\tUPOS={}\tXPOS={}\tFEATS={}\tHEAD={}\tDEPREL={}\tDEPS={}\tMISC={}\tWVEC={}\tFRAME={}\tROLE={}".format(
                 self.ID, self.FORM, self.LEMMA, 'XX', self.XPOS, 'XX',
                 self.HEAD, 'XX', self.DEPS, self.MISC, self.WVEC,
@@ -66,22 +70,24 @@ class Token():
 
     def encode(self):
         return Token([
-            self.ID, # not encoded
-            self.FORM, #  encoded later by sentence encoder
-            self.LEMMA, # not encoded
+            self.ID,  # not encoded
+            self.FORM,  # encoded later by sentence encoder
+            self.LEMMA,  # not encoded
             to_one_hot(upos_codec, self.UPOS),
             to_one_hot(xpos_codec, self.XPOS.split('|')),
             to_one_hot(feats_codec, self.FEATS.split('|')),
-            self.HEAD, #  not encoded
+            self.HEAD,  # not encoded
             to_one_hot(deprel_codec, self.DEPREL),
-            self.DEPS, #  not encoded
-            self.MISC, #  not encoded
+            self.DEPS,  # not encoded
+            self.MISC,  # not encoded
             to_index(frame_codec, self.FRAME),
             to_index(role_codec, self.ROLE),
             ], isEncoded=True)
 
+
 class Sentence():
-    """A class representing a sentence, ie. the tokens with their annotations."""
+    """A class representing a sentence,
+    ie. the tokens with their annotations."""
     def __init__(self, sent_id=None, full_text=None):
         self.sent_id = sent_id
         self.full_text = full_text
@@ -91,7 +97,10 @@ class Sentence():
         return len(self.tokens)
 
     def __repr__(self):
-        return '# sent_id = ' + self.sent_id + '\n' + '# text = ' + self.full_text + '\n' + '\n'.join([token.__repr__() for token in self.tokens])
+        return \
+                '# sent_id = ' + self.sent_id + '\n' + \
+                '# text = ' + self.full_text + '\n' + \
+                '\n'.join([token.__repr__() for token in self.tokens])
 
     def __getitem__(self, index):
         return self.tokens[index]
@@ -127,21 +136,8 @@ class Sentence():
 
 
 class ConlluDataset(Dataset):
-    def __init__(self, filename, features):
+    def __init__(self, filename):
         self.sentences = []
-        self.features = features
-
-        self.in_feats = 0
-        if 'UPOS' in features:
-            self.in_feats = self.in_feats + len(upos_codec.classes_)
-        if 'XPOS' in features:
-            self.in_feats = self.in_feats + len(xpos_codec.classes_)
-        if 'FEATS' in features:
-            self.in_feats = self.in_feats + len(feats_codec.classes_)
-        if 'DEPREL' in features:
-            self.in_feats = self.in_feats + len(deprel_codec.classes_)
-        if 'WVEC' in features:
-            self.in_feats = self.in_feats + 768
 
         self._load(filename)
 

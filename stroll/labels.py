@@ -1,6 +1,7 @@
 import torch
 from sklearn.preprocessing import LabelEncoder
 from transformers import BertTokenizer, BertModel
+import fasttext
 
 UPOS = [
         '_', 'ADJ', 'ADP', 'ADV', 'AUX', 'CCONJ', 'DET', 'INTJ', 'NOUN',
@@ -78,12 +79,29 @@ def to_index(codec, values):
     return torch.tensor(codec.transform([values])).flatten()
 
 
+class FasttextEncoder:
+    """Use Fasttext word vectors per word"""
+    def __init__(self, filename):
+        self.model = fasttext.load_model(filename)
+        self.dims = self.model.get_dimension()
+        self.name = 'FT{}'.format(self.dims)
+
+    def __call__(self, sentence):
+        word_vectors = []
+        for token in sentence:
+            word_vectors.append(torch.Tensor(self.model[token.FORM]))
+
+        return word_vectors
+
+
 class BertEncoder:
     """Use averaged bert vectors over constituent tokens"""
     def __init__(self):
         self.tokenizer = BertTokenizer.from_pretrained("bert-base-dutch-cased")
         self.model = BertModel.from_pretrained("bert-base-dutch-cased")
         self.model.eval()
+        self.dims = 768
+        self.name = 'BERT'
 
     def __call__(self, sentence):
         self.model.eval()
@@ -142,6 +160,6 @@ class BertEncoder:
                 # print (sentence)
                 # print ('len subword_tensors', len(subword_tensors))
                 # print (bert_i, chars_bert, gold_i, chars_gold, gold_t)
-                word_vectors.append(torch.zeros([768]))
+                word_vectors.append(torch.zeros([self.dims]))
 
         return word_vectors

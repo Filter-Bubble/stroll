@@ -1,3 +1,4 @@
+import sys
 import torch
 import torch.nn as nn
 
@@ -46,6 +47,51 @@ class GCN(nn.Module):
         return g.ndata.pop('h')
 
 
+class MLP(nn.Module):
+    def __init__(
+            self,
+            in_feats=64,
+            out_feats=64,
+            activation='relu',
+            h_layers=2
+            ):
+        super(MLP, self).__init__()
+        self.in_feats = in_feats
+        self.out_feats = out_feats
+        self.activation = activation
+        self.h_layers = h_layers
+
+        layers = []
+        for i in range(self.h_layers-1):
+            layer = nn.Linear(self.in_feats, self.in_feats)
+            nn.init.xavier_uniform_(
+                    layer.weight,
+                    nn.init.calculate_gain('sigmoid')
+                    )
+            layers.append(layer)
+
+            layer = nn.BatchNorm1d(self.in_feats)
+            layers.append(layer)
+
+            if self.activation == 'relu':
+                layer = nn.ReLU()
+            elif self.activation == 'tanhshrink':
+                layer = nn.Tanhshrink()
+            layers.append(layer)
+
+        layer = nn.Linear(self.in_feats, self.out_feats)
+        nn.init.xavier_uniform_(
+                layer.weight,
+                nn.init.calculate_gain('sigmoid')
+                )
+        layers.append(layer)
+
+        self.fc = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.fc(x)
+
+
 # https://docs.dgl.ai/en/0.4.x/tutorials/models/1_gnn/4_rgcn.html
 # simplify by setting num_bases = num_rels = 3
 class RGCN(nn.Module):
@@ -59,10 +105,8 @@ class RGCN(nn.Module):
         super(RGCN, self).__init__()
         self.in_feats = in_feats
         self.out_feats = out_feats
-        self.activation_ = activation
+        self.activation = activation
         self.skip = skip
-
-        self.activation = nn.ReLU()
 
         # weight bases in equation (3)
         self.weight = nn.Parameter(
@@ -77,6 +121,16 @@ class RGCN(nn.Module):
                 mode='fan_in',
                 nonlinearity='relu'
                 )
+
+        self.batchnorm = nn.BatchNorm1d(self.out_feats)
+
+        if activation == 'relu':
+            self.activation_ = nn.ReLU()
+        elif activation == 'tanhshrink':
+            self.activation_ = nn.Tanhshrink()
+        else:
+            print('Activation function not implemented.')
+            sys.exit(-1)
 
     def extra_repr(self):
         return 'in_feats={}, out_feats={}, skip={}'.format(
@@ -105,10 +159,14 @@ class RGCN(nn.Module):
         def rgcn_apply(nodes):
             h = nodes.data.pop('h')
             Swh = nodes.data.pop('Swh')
+
             if self.skip:
-                h = self.activation(h + Swh)
+                h = self.batchnorm(h + Swh)
             else:
-                h = self.activation(Swh)
+                h = self.batchnorm(h)
+
+            h = self.activation_(h + Swh)
+
             return {'h': h}
 
         graph.update_all(rgcn_msg, rgcn_reduce, rgcn_apply)
@@ -132,39 +190,50 @@ class Net(nn.Module):
         self.in_feats = in_feats
         self.out_feats_a = out_feats_a
         self.out_feats_b = out_feats_b
-        self.activation_ = activation
+        self.activation = activation
+
+        layers = []
 
         # Linear transform of one-hot-encoding to internal representation
-        self.linear_in = nn.Linear(self.in_feats, self.h_dims)
+        layer = nn.Linear(self.in_feats, self.h_dims)
         nn.init.xavier_uniform_(
-                self.linear_in.weight,
+                layer.weight,
                 nn.init.calculate_gain('relu')
                 )
+        layers.append(layer)
 
-        self.activation = nn.ReLU()
+        # Batchnorm
+        layer = nn.BatchNorm1d(self.h_dims)
+        layers.append(layer)
+
+        # Activation
+        if self.activation == 'relu':
+            layer = nn.ReLU()
+        elif self.activation == 'tanhshrink':
+            layer = nn.Tanhshrink()
+        layers.append(layer)
+
+        self.embedding = nn.Sequential(*layers)
 
         # Hidden layers, each of h_dims to h_dims
-        self.rgcn = nn.ModuleList()
+        rgcn_layers = []
         for i in range(self.h_layers):
-            next_layer = RGCN(
-                    in_feats=self.h_dims,
-                    out_feats=self.h_dims,
-                    activation=self.activation_,
-                    skip=True
+            rgcn_layers.append(
+                    RGCN(
+                        in_feats=self.h_dims,
+                        out_feats=self.h_dims,
+                        activation=self.activation,
+                        skip=True
+                        )
                     )
-            self.rgcn.append(next_layer)
+        self.rgcn = nn.Sequential(*rgcn_layers)
 
-        # Linear output
-        self.linear_out_a = nn.Linear(self.h_dims, self.out_feats_a)
-        self.linear_out_b = nn.Linear(self.h_dims, self.out_feats_b)
-
-        nn.init.xavier_uniform_(
-                self.linear_out_a.weight,
-                nn.init.calculate_gain('sigmoid')
+        # a MLP per task
+        self.task_a = MLP(
+                in_feats=self.h_dims, out_feats=out_feats_a, h_layers=2
                 )
-        nn.init.xavier_uniform_(
-                self.linear_out_b.weight,
-                nn.init.calculate_gain('sigmoid')
+        self.task_b = MLP(
+                in_feats=self.h_dims, out_feats=out_feats_b, h_layers=2
                 )
 
         # Weight factors for combining the two losses
@@ -173,18 +242,14 @@ class Net(nn.Module):
 
     def forward(self, g):
         # Linear transform of one-hot-encoding to internal representation
-        x = self.linear_in(g.ndata['v'])
-        x = self.activation(x)
-        g.ndata['h'] = x
+        g.ndata['h'] = self.embedding(g.ndata['v'])
 
         # Hidden layers, each of h_dims to h_dims
-        for i in range(self.h_layers):
-            g = self.rgcn[i](g)
+        g = self.rgcn(g)
 
-        # Linear output
-        x = g.ndata['h']
-        x_a = self.linear_out_a(x)
-        x_b = self.linear_out_b(x)
+        # MLP output
+        x_a = self.task_a(g.ndata['h'])
+        x_b = self.task_b(g.ndata['h'])
 
         return x_a, x_b
 

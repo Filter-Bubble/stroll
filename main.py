@@ -12,7 +12,7 @@ import dgl
 
 from stroll.graph import GraphDataset
 from stroll.model import Net
-from stroll.labels import BertEncoder
+from stroll.labels import BertEncoder, FasttextEncoder
 from stroll.labels import FRAME_WEIGHTS, ROLE_WEIGHTS, frame_codec, role_codec
 from stroll.focalloss import FocalLoss
 
@@ -81,6 +81,12 @@ if __name__ == '__main__':
             help='Features used by the model'
             )
     parser.add_argument(
+            '--fasttext',
+            default=None,
+            dest='fasttext',
+            help='Fasttext  model to use instead of Bert.'
+            )
+    parser.add_argument(
             '--h_layers',
             dest='h_layers',
             type=int,
@@ -93,6 +99,13 @@ if __name__ == '__main__':
             default='CE',
             choices=['CE', 'FL'],
             help='Type of loss function (cross entry / focall loss)',
+            )
+    parser.add_argument(
+            '--activation',
+            dest='activation',
+            default='relu',
+            choices=['relu', 'tanhshrink'],
+            help='Activation function for the RGCN layers.'
             )
     parser.add_argument(
             '--solver',
@@ -115,26 +128,32 @@ if __name__ == '__main__':
             )
     args = parser.parse_args()
 
-    exp_name = '{}_{}_{:1.0e}_{:d}b_{:d}d_{:d}l_{}'.format(
+    exp_name = '{}_{}_{:1.0e}_{:d}b_{:d}d_{:d}lBN_{}_{}_MLP2_{}'.format(
             args.solver,
             args.loss_function,
             args.lr,
             args.batch_size,
             args.h_dims,
             args.h_layers,
-            '_'.join(args.features)
+            args.activation,
+            '_'.join(args.features),
+            '_eBN'
             )
+
+    if 'WVEC' in args.features:
+        if args.fasttext:
+            sentence_encoder = FasttextEncoder(args.fasttext)
+        else:
+            sentence_encoder = BertEncoder()
+        exp_name += '_' + sentence_encoder.name
+    else:
+        sentence_encoder = None
 
     args.word_count = 0
     args.exp_name = exp_name
     print('Experiment {}'.format(args.exp_name))
 
     logging.info('Preparing test dataset.')
-    if 'WVEC' in args.features:
-        sentence_encoder = BertEncoder()
-    else:
-        sentence_encoder = None
-
     train_set = GraphDataset(
             args.train_set,
             sentence_encoder=sentence_encoder,
@@ -163,7 +182,7 @@ if __name__ == '__main__':
         h_dims=args.h_dims,
         out_feats_a=2,  # number of frames
         out_feats_b=21,  # number of roles
-        activation='relu'
+        activation=args.activation
         )
     print(net.__repr__())
 
@@ -325,11 +344,18 @@ if __name__ == '__main__':
 
                 for name, param in net.state_dict().items():
                     writer.add_histogram('hist_' + name, param, word_count)
-                    writer.add_scalar(
-                            'norm_' + name,
-                            torch.norm(param),
-                            word_count
-                            )
+                    if param.dtype == torch.int64:
+                        writer.add_scalar(
+                                'norm_' + name,
+                                torch.norm(param.float()),
+                                word_count
+                                )
+                    else:
+                        writer.add_scalar(
+                                'norm_' + name,
+                                torch.norm(param),
+                                word_count
+                                )
 
                 # reset timer
                 next_eval = next_eval + count_per_eval
