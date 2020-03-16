@@ -40,19 +40,13 @@ class Token():
 
     def __repr__(self):
         if self.isEncoded:
-            # Only for debugging and interactive use,
-            # so no constraints on this format
-            return "ID={}\tFORM={}\tLEMMA={}\tUPOS={}\tXPOS={}\tFEATS={}\tHEAD={}\tDEPREL={}\tDEPS={}\tMISC={}\tWVEC={}\tFRAME={}\tROLE={}".format(
-                self.ID, self.FORM, self.LEMMA, 'XX', self.XPOS, 'XX',
-                self.HEAD, 'XX', self.DEPS, self.MISC, self.WVEC,
-                'XX', 'XX'
-                )
+            return 'Encoded'
         else:
             # Used for outputting back to conllu
             return "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
-                self.ID, self.FORM, self.LEMMA, self.UPOS, self.XPOS, self.FEATS,
-                self.HEAD, self.DEPREL, self.DEPS, self.MISC,
-                self.FRAME, self.ROLE 
+                self.ID, self.FORM, self.LEMMA, self.UPOS, self.XPOS,
+                self.FEATS, self.HEAD, self.DEPREL, self.DEPS, self.MISC,
+                self.FRAME, self.ROLE
                 )
 
     def __getitem__(self, index):

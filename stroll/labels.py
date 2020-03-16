@@ -136,8 +136,8 @@ class BertEncoder:
             bert_output, _ = self.model(tokens_tensor)
 
         # Realign the tokens and build the word vectors by averaging
-        # ['Repareer',             'de', 'token-izatie',                     '.']
-        # ['Rep', '##are', '##er', 'de', 'to', '##ken', '-', 'iza', '##tie', '.']
+        # ['Repareer',             'de', 'token-izatie',                   ]
+        # ['Rep', '##are', '##er', 'de', 'to', '##ken', '-', 'iza', '##tie']
         word_vectors = []
 
         # Align tokenizations
@@ -156,7 +156,8 @@ class BertEncoder:
 
                 bert_t = tokenized_text[bert_i]
                 if bert_t == self.tokenizer.unk_token:
-                    # assume the unk token stands for the whole remaining gold token
+                    # assume the unk token stands for the whole remaining gold
+                    # token
                     chars_bert = chars_gold
                 else:
                     chars_bert = chars_bert + len(bert_t)
