@@ -66,6 +66,8 @@ class Token():
             return self.DEPREL
         elif index == 'WVEC':
             return self.WVEC
+        elif index == 'RID':
+            return self.RID
         return None
 
     def encode(self):

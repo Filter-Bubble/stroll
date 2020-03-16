@@ -86,6 +86,8 @@ class MLP(nn.Module):
                 )
         layers.append(layer)
 
+        # layers.append(nn.Dropout(p=0.5))
+
         self.fc = nn.Sequential(*layers)
 
     def forward(self, x):

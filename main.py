@@ -13,7 +13,8 @@ import dgl
 from stroll.graph import GraphDataset
 from stroll.model import Net
 from stroll.labels import BertEncoder, FasttextEncoder
-from stroll.labels import FRAME_WEIGHTS, ROLE_WEIGHTS, frame_codec, role_codec
+from stroll.labels import encoded_frame_weights, encoded_role_weights, \
+        frame_codec, role_codec
 from stroll.focalloss import FocalLoss
 
 import matplotlib.pyplot as plt
@@ -77,7 +78,7 @@ if __name__ == '__main__':
             nargs='*',
             dest='features',
             default=['UPOS', 'FEATS', 'DEPREL', 'WVEC'],
-            choices=['UPOS', 'XPOS', 'FEATS', 'DEPREL', 'WVEC'],
+            choices=['UPOS', 'XPOS', 'FEATS', 'DEPREL', 'WVEC', 'RID'],
             help='Features used by the model'
             )
     parser.add_argument(
@@ -195,7 +196,7 @@ if __name__ == '__main__':
             )
         scheduler = torch.optim.lr_scheduler.StepLR(
             optimizer,
-            step_size=1,
+            step_size=3,
             gamma=0.9
             )
     elif args.solver == 'ADAM':
@@ -211,24 +212,19 @@ if __name__ == '__main__':
 
     logging.info('Initializing loss functions.')
     if args.loss_function == 'FL':
-        focal_frame_loss = FocalLoss(
-                gamma=5.,
-                alpha=FRAME_WEIGHTS.view(-1),
-                size_average=True
-                )
-        focal_role_loss = FocalLoss(
-                gamma=5.,
-                alpha=ROLE_WEIGHTS.view(-1),
-                size_average=True
-                )
+        focal_frame_loss = FocalLoss(gamma=5., alpha=None, size_average=True)
+        focal_role_loss = FocalLoss(gamma=5., alpha=None, size_average=True)
     elif args.loss_function == 'CE':
         pass
 
     print('Looking for "restart.pt".')
     try:
-        net.load_state_dict(torch.load('restart.pt'))
+        restart = torch.load('restart.pt')
+        net.load_state_dict(restart, strict=False)
+        word_count = restart['hyperparams'].word_count
         print('Restart succesful.')
     except(FileNotFoundError):
+        word_count = 0
         print('Restart failed, starting from scratch.')
 
     print('Tensorboard output in "{}".'.format(exp_name))
@@ -246,10 +242,10 @@ if __name__ == '__main__':
     signal.signal(signal.SIGINT, sigterm_handler)
 
     # diagnostic settings
-    word_count = 0
     count_per_eval = 5000
     next_eval = count_per_eval
     t0 = time.time()
+    best_model_accuracy = 0.
 
     print('Start training for {:d} epochs.'.format(args.epochs))
 
@@ -277,14 +273,14 @@ if __name__ == '__main__':
                 loss_frame = F.cross_entropy(
                         logits_frame.view(1, 2, -1),
                         target.view(1, -1),
-                        FRAME_WEIGHTS.view(1, -1))
+                        encoded_frame_weights.view(1, -1))
 
                 target = g.ndata['role']
                 logits_role = logits_role.transpose(0, 1)
                 loss_role = F.cross_entropy(
                         logits_role.view(1, 21, -1),
                         target.view(1, -1),
-                        ROLE_WEIGHTS.view(1, -1))
+                        encoded_role_weights.view(1, -1))
 
             elif args.loss_function == 'FL':
                 target = g.ndata['frame'].view(-1)
@@ -356,6 +352,12 @@ if __name__ == '__main__':
                                 torch.norm(param),
                                 word_count
                                 )
+
+                # Save best-until-now model
+                if epoch > 2 and accR > best_model_accuracy:
+                    best_model_accuracy = accR
+                    args.word_count = word_count
+                    save_model_with_args(net, args)
 
                 # reset timer
                 next_eval = next_eval + count_per_eval

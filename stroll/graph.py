@@ -7,6 +7,8 @@ from .conllu import ConlluDataset
 
 from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec
 
+RID_DIMS = 4
+
 
 def draw_graph(graph):
     # label_tensor = graph.ndata['form']
@@ -38,6 +40,8 @@ class GraphDataset(ConlluDataset):
             self.in_feats = self.in_feats + len(deprel_codec.classes_)
         if 'WVEC' in features:
             self.in_feats = self.in_feats + self.sentence_encoder.dims
+        if 'RID' in features:
+            self.in_feats = self.in_feats + RID_DIMS
 
     def __iter__(self):
         for i in range(len(self.sentences)):
@@ -53,8 +57,23 @@ class GraphDataset(ConlluDataset):
         # used to map the word ID to the node ID
         wid_to_nid = {}
 
+        # children count per wid
+        children_per_wid = {}
+
         # add nodes
         for token in sentence:
+            # add a relative position to the token
+            # we label tokens for each head by their order in the sentence
+            # ie. first-child, second-child, etc
+            if token.ID in children_per_wid:
+                children_per_wid[token.ID] += 1
+                if children_per_wid[token.ID] == RID_DIMS:
+                    children_per_wid[token.ID] = RID_DIMS - 1
+            else:
+                children_per_wid[token.ID] = 0
+            token.RID = torch.zeros([RID_DIMS])
+            token.RID[children_per_wid[token.ID]] = 1.
+
             g.add_nodes(1, {
                 'v': torch.cat(
                     [token[f] for f in self.features],

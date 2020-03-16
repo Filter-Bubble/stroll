@@ -2,6 +2,8 @@ import torch
 from sklearn.preprocessing import LabelEncoder
 from transformers import BertTokenizer, BertModel
 import fasttext
+import numpy as np
+
 
 UPOS = [
         '_', 'ADJ', 'ADP', 'ADV', 'AUX', 'CCONJ', 'DET', 'INTJ', 'NOUN',
@@ -49,14 +51,14 @@ ROLES = [
         'ArgM-NEG', 'ArgM-PNC', 'ArgM-PRD', 'ArgM-REC', 'ArgM-STR', 'ArgM-TMP'
         ]
 
-ROLE_WEIGHTS = torch.tensor([
+ROLE_WEIGHTS = [
     1e-4,
     2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
     0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5
-    ])
+    ]
 
 FRAMES = ['_', 'rel']
-FRAME_WEIGHTS = torch.tensor([1.0, 10.0])
+FRAME_WEIGHTS = [1.0, 10.0]
 
 upos_codec = LabelEncoder().fit(UPOS)
 xpos_codec = LabelEncoder().fit(XPOS)
@@ -64,6 +66,18 @@ deprel_codec = LabelEncoder().fit(DEPREL)
 feats_codec = LabelEncoder().fit(FEATS)
 frame_codec = LabelEncoder().fit(FRAMES)
 role_codec = LabelEncoder().fit(ROLES)
+
+
+def encoded_weights(codec, labels, weights):
+    """Label weights are defined in the same order as we define the labels.
+    However, the LabelEncoder reorders the labels.
+    This function applys the same reordering to the weights."""
+    idx = codec.transform(labels)
+    return torch.Tensor([weights[i] for i in idx])
+
+
+encoded_frame_weights = encoded_weights(frame_codec, FRAMES, FRAME_WEIGHTS)
+encoded_role_weights = encoded_weights(role_codec, ROLES, ROLE_WEIGHTS)
 
 
 def to_one_hot(codec, values):
