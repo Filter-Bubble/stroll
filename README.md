@@ -19,6 +19,24 @@ Conversion scripts from Alpino and Lassy to the UD format [available here](https
 I am planning to use universal dependencies schema for the syntax, and assume input files are in conllu format.
 This way the labeller can be used as part of the Newsreader annotation pipeline.
 
+## Approach
+
+The training set was made as annotations on top of a syntactic tree.
+We'll use the same tree, as given by the `HEAD` and `DEPREL` fields from the conll files.
+Words form the nodes, and we add three kinds of edges:
+ * from dependent to head (weighted by the number of dependents)
+ * from the head to the dependent
+ * from the node to itself
+
+At each node, we add a `GRU` cell.
+The initial state is made using one-hot encoding of a number of features.
+The output of the cell is then passed to two classifiers
+One to indicate if this word is a frame, and one to indicate if the word is the head of an arguments (and which argument).
+
+As node features we can use the information in the conllu file.
+We also added pre-trained word vectors form either fasttext, or BERTje.
+Finally, we add a positional encoding (ie. 'first descendant').
+
 # Installation
 
 Setup a virtual env with python3, and install dependencies:
@@ -31,8 +49,6 @@ pip install -r requirements.txt
 # Best model until now
 
 ## Model layers
-
-Relational - graph convolutional network, with a GRU cell.
 
 ```
 Net(
@@ -82,7 +98,9 @@ Net(
 
 2 classes are so rare, they are not in our 10% evaluation set, and were not predicted by the model. (`Arg5` and `ArgM-STR`).
 
-The confustion matrix and statistics (classification_report) were made with `scikit-learn`.
+The confustion matrix and statistics (`classification_report`) were made with `scikit-learn`.
+
+The best model was after 6628920 words, or 15 epochs.
 
 ### Frames
 
