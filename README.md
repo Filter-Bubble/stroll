@@ -46,6 +46,13 @@ python3 -m venv env
 pip install -r requirements.txt
 ```
 
+# Plans
+
+* Train frames and roles separately, to see effect of multi-task learning;
+* Reconsider how we use the BERT wordvectors. We now first encode a whole sentence, and sum the resulting vectors per bert-token to our tokeninzation. Alternatively, per word we find the sentence part it is the head of, and encode that.
+* Tune hyperparameters (activation, layers, dimensions);
+
+
 # Best model until now
 
 ## Model layers
