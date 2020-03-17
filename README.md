@@ -171,3 +171,12 @@ The best model was after 6628920 words, or 15 epochs.
 |   macro avg |      0.71  |    0.67  |    0.68   |  49479|
 |weighted avg |      0.94  |    0.94  |    0.94   |  49479|
 
+
+# References
+
+[Encoding Sentences with Graph Convolutional Networks for Semantic Role Labeling](https://arxiv.org/abs/1703.04826)
+[Multi-Task Learning Using Uncertainty to Weigh Losses for Scene Geometry and Semantics](https://arxiv.org/pdf/1705.07115.pdf)
+[Focal Loss for Dense Object Detection](https://arxiv.org/abs/1708.02002)
+[GaAN: Gated Attention Networks for Learning on Large and Spatiotemporal Graphs](https://arxiv.org/abs/1803.07294)
+[Look Again at the Syntax: Relational Graph Convolutional Network for Gendered Ambiguous Pronoun Resolution](https://arxiv.org/abs/1905.08868) [code](https://github.com/ianycxu/RGCN-with-BERT)
+[Deep Graph Library](https://www.dgl.ai)
