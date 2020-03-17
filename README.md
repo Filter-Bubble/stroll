@@ -187,3 +187,4 @@ The best model was after 6628920 words, or 15 epochs.
 [GaAN: Gated Attention Networks for Learning on Large and Spatiotemporal Graphs](https://arxiv.org/abs/1803.07294)
 [Look Again at the Syntax: Relational Graph Convolutional Network for Gendered Ambiguous Pronoun Resolution](https://arxiv.org/abs/1905.08868) [code](https://github.com/ianycxu/RGCN-with-BERT)
 [Deep Graph Library](https://www.dgl.ai)
+[Encoding Sentences with Graph Convolutional Networks for Semantic Role Labeling](https://arxiv.org/abs/1703.04826)
