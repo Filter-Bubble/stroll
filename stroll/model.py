@@ -11,42 +11,6 @@ from sklearn.metrics import balanced_accuracy_score
 from .labels import role_codec, frame_codec
 
 
-class NodeApplyModule(nn.Module):
-    def __init__(self, in_feats, out_feats, activation):
-        super(NodeApplyModule, self).__init__()
-        self.linear = nn.Linear(in_feats, out_feats)
-        self.activation = activation
-
-    def forward(self, node):
-        feats = self.linear(node.data['h'])
-        if self.activation is not None:
-            feats = self.activation(feats)
-        return {'h': feats}
-
-
-class GCN(nn.Module):
-    def __init__(self, in_feats, out_feats, activation):
-        super(GCN, self).__init__()
-        self.in_feats = in_feats
-        self.out_feats = out_feats
-        self.activation = activation
-        self.apply_mod = NodeApplyModule(
-                self.in_feats,
-                self.out_feats,
-                self.activation
-                )
-
-    def forward(self, g, feature):
-
-        gcn_msg = fn.copy_src(src='h', out='m')
-        gcn_reduce = fn.mean(msg='m', out='h')
-
-        g.ndata['h'] = feature
-        g.update_all(gcn_msg, gcn_reduce)
-        g.apply_nodes(func=self.apply_mod)
-        return g.ndata.pop('h')
-
-
 class MLP(nn.Module):
     def __init__(
             self,
@@ -176,6 +140,90 @@ class RGCN(nn.Module):
         return graph
 
 
+# https://docs.dgl.ai/en/0.4.x/tutorials/models/1_gnn/4_rgcn.html
+# simplify by setting num_bases = num_rels = 3
+class RGCNGRU(nn.Module):
+    def __init__(
+            self,
+            in_feats=64,
+            out_feats=64,
+            num_layers=2
+            ):
+        super(RGCNGRU, self).__init__()
+        self.in_feats = in_feats
+        self.out_feats = out_feats
+        self.num_layers = num_layers
+
+        # weight bases in equation (3)
+        self.weight = nn.Parameter(
+                torch.Tensor(3, self.in_feats, self.out_feats)
+                )
+        nn.init.kaiming_uniform_(
+                self.weight,
+                mode='fan_in',
+                nonlinearity='relu'
+                )
+
+        self.gru = nn.GRU(
+                input_size=self.in_feats,
+                hidden_size=self.out_feats,
+                num_layers=1,  # for stacked GRU's, not our use case
+                bias=True,
+                dropout=0,  # we'll use Batchnorm instead
+                )
+
+        self.batchnorm = nn.BatchNorm1d(self.out_feats)
+
+    def extra_repr(self):
+        return 'in_feats={}, out_feats={}'.format(
+                self.in_feats, self.out_feats
+                )
+
+    def forward(self, graph):
+        weight = self.weight
+
+        # At each edge, multiply the state h from the source node
+        # with a linear weight W_(edge_type)
+        def rgcn_msg(edges):
+            w = weight[edges.data['rel_type']]
+            n = edges.data['norm']
+            msg = torch.bmm(edges.src['h'].unsqueeze(1), w).squeeze()
+            msg = torch.bmm(n.reshape(-1, 1, 1), msg.unsqueeze(1)).squeeze()
+
+            return {'m': msg}
+
+        # At each node, we want the summed messages W_(edge_type) \dot h
+        # from the incomming edges
+        rgcn_reduce = fn.sum(msg='m', out='Swh')
+
+        # Apply GRU to the sum(in_edges) W_(edge_type) \dot h
+        def rgcn_apply(nodes):
+            # Shape of h: [len(graph), self.out_feats]
+            # GRU wants: [seq_len, batch, input_size]
+            output, h_next = self.gru(
+                    nodes.data.pop('Swh').view(1, len(graph), self.out_feats),
+                    nodes.data.pop('h').view(1, len(graph), self.out_feats)
+                    )
+
+            nodes.data.pop('output')
+
+            return {
+                    'h': h_next.view(len(graph), self.out_feats),
+                    'output': output.view(len(graph), self.out_feats)
+                    }
+
+        graph.ndata['output'] = torch.zeros([len(graph), self.out_feats])
+        for l in range(self.num_layers):
+            graph.update_all(rgcn_msg, rgcn_reduce, rgcn_apply)
+
+        # Batchnorm
+        graph.ndata.pop('h')
+        output = graph.ndata.pop('output')
+        graph.ndata['h'] = self.batchnorm(output)
+
+        return graph
+
+
 class Net(nn.Module):
     def __init__(
             self,
@@ -218,17 +266,23 @@ class Net(nn.Module):
         self.embedding = nn.Sequential(*layers)
 
         # Hidden layers, each of h_dims to h_dims
-        rgcn_layers = []
-        for i in range(self.h_layers):
-            rgcn_layers.append(
-                    RGCN(
-                        in_feats=self.h_dims,
-                        out_feats=self.h_dims,
-                        activation=self.activation,
-                        skip=True
-                        )
-                    )
-        self.rgcn = nn.Sequential(*rgcn_layers)
+        self.kernel = RGCNGRU(
+                in_feats=self.h_dims,
+                out_feats=self.h_dims,
+                num_layers=self.h_layers
+                )
+
+        # rgcn_layers = []
+        # for i in range(self.h_layers):
+        #     rgcn_layers.append(
+        #             RGCN(
+        #                 in_feats=self.h_dims,
+        #                 out_feats=self.h_dims,
+        #                 activation=self.activation,
+        #                 skip=True
+        #                 )
+        #             )
+        # self.kernel = nn.Sequential(*rgcn_layers)
 
         # a MLP per task
         self.task_a = MLP(
@@ -247,7 +301,7 @@ class Net(nn.Module):
         g.ndata['h'] = self.embedding(g.ndata['v'])
 
         # Hidden layers, each of h_dims to h_dims
-        g = self.rgcn(g)
+        g = self.kernel(g)
 
         # MLP output
         x_a = self.task_a(g.ndata['h'])

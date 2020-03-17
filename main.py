@@ -102,6 +102,13 @@ if __name__ == '__main__':
             help='Type of loss function (cross entry / focall loss)',
             )
     parser.add_argument(
+            '--dynamic_loss',
+            dest='dynamic_loss',
+            default=False,
+            action='store_true',
+            help='Dynamically combine losses, or use a constant factor.'
+            )
+    parser.add_argument(
             '--activation',
             dest='activation',
             default='relu',
@@ -129,7 +136,12 @@ if __name__ == '__main__':
             )
     args = parser.parse_args()
 
-    exp_name = '{}_{}_{:1.0e}_{:d}b_{:d}d_{:d}lBN_{}_{}_MLP2_{}'.format(
+    if args.dynamic_loss:
+        loss_suffix = 'dyn'
+    else:
+        loss_suffix = 'cst'
+
+    exp_name = 'GRUslow_{}_{}_{:1.0e}_{:d}b_{:d}d_{:d}lBN_{}_{}_MLP2_{}_{}'.format(
             args.solver,
             args.loss_function,
             args.lr,
@@ -138,7 +150,8 @@ if __name__ == '__main__':
             args.h_layers,
             args.activation,
             '_'.join(args.features),
-            '_eBN'
+            '_eBN',
+            loss_suffix
             )
 
     if 'WVEC' in args.features:
@@ -207,7 +220,7 @@ if __name__ == '__main__':
         scheduler = torch.optim.lr_scheduler.StepLR(
             optimizer,
             step_size=1,
-            gamma=0.5
+            gamma=0.9
             )
 
     logging.info('Initializing loss functions.')
@@ -292,8 +305,11 @@ if __name__ == '__main__':
                 loss_role = focal_role_loss(logits_role.view(21, -1), target)
 
             # add the two losses
-            loss = torch.exp(-1. * net.loss_a) * loss_role + 0.5 * net.loss_a
-            loss += torch.exp(-1. * net.loss_b) * loss_frame + 0.5 * net.loss_b
+            if args.dynamic_loss:
+                loss = torch.exp(-1. * net.loss_a) * loss_role + 0.5 * net.loss_a
+                loss += torch.exp(-1. * net.loss_b) * loss_frame + 0.5 * net.loss_b
+            else:
+                loss = loss_role + loss_frame
 
             # apply loss
             optimizer.zero_grad()
