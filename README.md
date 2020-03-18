@@ -49,6 +49,7 @@ pip install -r requirements.txt
 # Plans
 
 * Train frames and roles separately, to see effect of multi-task learning;
+* Run with similar parameters as [1]. 512 dims for the GRU cell, 128 for the role classifier;
 * Reconsider how we use the BERT wordvectors. We now first encode a whole sentence, and sum the resulting vectors per bert-token to our tokeninzation. Alternatively, per word we find the sentence part it is the head of, and encode that.
 * Tune hyperparameters (activation, layers, dimensions);
 
@@ -181,10 +182,11 @@ The best model was after 6628920 words, or 15 epochs.
 
 # References
 
-[Encoding Sentences with Graph Convolutional Networks for Semantic Role Labeling](https://arxiv.org/abs/1703.04826)
-[Multi-Task Learning Using Uncertainty to Weigh Losses for Scene Geometry and Semantics](https://arxiv.org/pdf/1705.07115.pdf)
-[Focal Loss for Dense Object Detection](https://arxiv.org/abs/1708.02002)
-[GaAN: Gated Attention Networks for Learning on Large and Spatiotemporal Graphs](https://arxiv.org/abs/1803.07294)
-[Look Again at the Syntax: Relational Graph Convolutional Network for Gendered Ambiguous Pronoun Resolution](https://arxiv.org/abs/1905.08868) [code](https://github.com/ianycxu/RGCN-with-BERT)
-[Deep Graph Library](https://www.dgl.ai)
-[Encoding Sentences with Graph Convolutional Networks for Semantic Role Labeling](https://arxiv.org/abs/1703.04826)
+1. [Encoding Sentences with Graph Convolutional Networks for Semantic Role Labeling](https://arxiv.org/abs/1703.04826)
+2. [Multi-Task Learning Using Uncertainty to Weigh Losses for Scene Geometry and Semantics](https://arxiv.org/pdf/1705.07115.pdf)
+3. [Focal Loss for Dense Object Detection](https://arxiv.org/abs/1708.02002)
+4. [GaAN: Gated Attention Networks for Learning on Large and Spatiotemporal Graphs](https://arxiv.org/abs/1803.07294)
+5. [Look Again at the Syntax: Relational Graph Convolutional Network for Gendered Ambiguous Pronoun Resolution](https://arxiv.org/abs/1905.08868) [code](https://github.com/ianycxu/RGCN-with-BERT)
+6. [Deep Graph Library](https://www.dgl.ai)
+7. [The CoNLL-2009 shared task: syntactic and semantic dependencies in multiple languages](https://dl.acm.org/doi/10.5555/1596409.1596411)
+8. [2009 Shared task evaluation script](https://ufal.mff.cuni.cz/conll2009-st/scorer.html)

@@ -119,7 +119,7 @@ if __name__ == '__main__':
             '--solver',
             dest='solver',
             default='ADAM',
-            choices=['ADAM', 'SGD'],
+            choices=['ADAM', 'SGD', 'ADAMW'],
             help='Optimizer (SGD/ADAM) and learning rate schedule',
             )
     parser.add_argument(
@@ -141,7 +141,7 @@ if __name__ == '__main__':
     else:
         loss_suffix = 'cst'
 
-    exp_name = 'GRUslow_{}_{}_{:1.0e}_{:d}b_{:d}d_{:d}lBN_{}_{}_MLP2_{}_{}'.format(
+    exp_name = 'GRU_{}_{}_{:1.0e}_{:d}b_{:d}d_{:d}lBN_{}_{}_MLP2_{}_{}'.format(
             args.solver,
             args.loss_function,
             args.lr,
@@ -221,6 +221,16 @@ if __name__ == '__main__':
             optimizer,
             step_size=1,
             gamma=0.9
+            )
+    elif args.solver == 'ADAMW':
+        optimizer = torch.optim.AdamW(
+            net.parameters(),
+            lr=args.lr
+            )
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer,
+            step_size=100,
+            gamma=1.0
             )
 
     logging.info('Initializing loss functions.')
