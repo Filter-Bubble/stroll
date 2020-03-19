@@ -120,3 +120,33 @@ print(confusion_matrix(
 print('\n')
 
 print(classification_report(gold_roles, predicted_roles))
+
+
+print('Roles - simplified')
+
+main_args = ['Arg0', 'Arg1', 'Arg2', 'Arg3', 'Arg4', 'Arg5']
+reduced_gold = []
+for label in gold_roles:
+    if label in main_args:
+        reduced_gold.append('Arg')
+    elif label == '_':
+        reduced_gold.append('_')
+    else:
+        reduced_gold.append('Mod')
+
+reduced_pred = []
+for label in predicted_roles:
+    if label in main_args:
+        reduced_pred.append('Arg')
+    elif label == '_':
+        reduced_pred.append('_')
+    else:
+        reduced_pred.append('Mod')
+
+print(confusion_matrix(
+    reduced_gold, reduced_pred, normalize=args.cm_normalize
+    ))
+
+print('\n')
+
+print(classification_report(reduced_gold, reduced_pred))

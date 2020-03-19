@@ -41,6 +41,9 @@ class MLP(nn.Module):
                 layer = nn.ReLU()
             elif self.activation == 'tanhshrink':
                 layer = nn.Tanhshrink()
+            else:
+                print('Activation function not implemented.')
+                sys.exit(-1)
             layers.append(layer)
 
         layer = nn.Linear(self.in_feats, self.out_feats)
@@ -187,7 +190,7 @@ class RGCNGRU(nn.Module):
         def rgcn_msg(edges):
             w = weight[edges.data['rel_type']]
             n = edges.data['norm']
-            msg = torch.bmm(edges.src['h'].unsqueeze(1), w).squeeze()
+            msg = torch.bmm(edges.src['output'].unsqueeze(1), w).squeeze()
             msg = torch.bmm(n.reshape(-1, 1, 1), msg.unsqueeze(1)).squeeze()
 
             return {'m': msg}
@@ -205,14 +208,19 @@ class RGCNGRU(nn.Module):
                     nodes.data.pop('h').view(1, len(graph), self.out_feats)
                     )
 
-            nodes.data.pop('output')
-
             return {
                     'h': h_next.view(len(graph), self.out_feats),
                     'output': output.view(len(graph), self.out_feats)
                     }
 
-        graph.ndata['output'] = torch.zeros([len(graph), self.out_feats])
+        # the embedded node features are the first input to the GRU layer
+        graph.ndata['output'] = graph.ndata.pop('h')
+
+        # initial hidden state of the GRU cell
+        graph.ndata['h'] = torch.zeros([len(graph), self.out_feats])
+
+        # each step will take the output and hidden state of t-1,
+        # and create a new output and hidden state for step t
         for l in range(self.num_layers):
             graph.update_all(rgcn_msg, rgcn_reduce, rgcn_apply)
 

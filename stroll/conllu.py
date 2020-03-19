@@ -6,6 +6,20 @@ from .labels import to_one_hot, to_index
 from .labels import ROLES, FRAMES
 
 
+def is_ok(sentence):
+    # Check if the syntactic head of each argument is also a SRL Frame
+    ID_to_frame = {}
+    ID_to_frame['0'] = '_'  # for when looking at the frame of the head
+    for idx, token in enumerate(sentence):
+        ID_to_frame[token.ID] = token.FRAME
+    for token in sentence:
+        if token.ROLE != '_':
+            if ID_to_frame[token.HEAD] != 'rel':
+                print('Dropping:', sentence.sent_id)
+                return False
+    return True
+
+
 class Token():
     """A class representing a single token, ie. a word, with its annotation."""
     def __init__(self, fields, isEncoded=False):

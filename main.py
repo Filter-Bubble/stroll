@@ -365,7 +365,6 @@ if __name__ == '__main__':
                 writer.add_scalar('accuracy_frame', accF, word_count)
 
                 for name, param in net.state_dict().items():
-                    writer.add_histogram('hist_' + name, param, word_count)
                     if param.dtype == torch.int64:
                         writer.add_scalar(
                                 'norm_' + name,
@@ -380,7 +379,7 @@ if __name__ == '__main__':
                                 )
 
                 # Save best-until-now model
-                if epoch > 2 and accR > best_model_accuracy:
+                if epoch > 0 and accR > best_model_accuracy:
                     best_model_accuracy = accR
                     args.word_count = word_count
                     save_model_with_args(net, args)
