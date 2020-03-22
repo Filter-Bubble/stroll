@@ -13,7 +13,7 @@ import dgl
 from stroll.graph import GraphDataset
 from stroll.model import Net
 from stroll.labels import BertEncoder, FasttextEncoder
-from stroll.labels import encoded_frame_weights, encoded_role_weights, \
+from stroll.labels import FRAME_WEIGHTS, ROLE_WEIGHTS, \
         frame_codec, role_codec
 from stroll.focalloss import FocalLoss
 
@@ -49,7 +49,7 @@ if __name__ == '__main__':
             '--epochs',
             dest='epochs',
             type=int,
-            default=20,
+            default=60,
             help='Number of epochs to train'
             )
     parser.add_argument(
@@ -99,7 +99,14 @@ if __name__ == '__main__':
             dest='loss_function',
             default='CE',
             choices=['CE', 'FL'],
-            help='Type of loss function (cross entry / focall loss)',
+            help='Type of loss function (cross entry / focal loss)',
+            )
+    parser.add_argument(
+            '--loss_gamma',
+            dest='loss_gamma',
+            type=float,
+            default=5,
+            help='Exponent gamma in FocalLoss'
             )
     parser.add_argument(
             '--dynamic_loss',
@@ -136,23 +143,25 @@ if __name__ == '__main__':
             )
     args = parser.parse_args()
 
-    if args.dynamic_loss:
-        loss_suffix = 'dyn'
+    if args.loss_function == 'FL':
+        loss_suffix = 'FL{}'.format(args.loss_gamma)
     else:
-        loss_suffix = 'cst'
+        loss_suffix = 'CE'
 
-    exp_name = 'GRU_{}_{}_{:1.0e}_{:d}b_{:d}d_{:d}lBN_{}_{}_MLP2_{}_{}'.format(
-            args.solver,
-            args.loss_function,
-            args.lr,
-            args.batch_size,
-            args.h_dims,
-            args.h_layers,
-            args.activation,
-            '_'.join(args.features),
-            '_eBN',
-            loss_suffix
-            )
+    if args.dynamic_loss:
+        loss_suffix += 'dyn'
+    else:
+        loss_suffix += 'cst'
+
+    exp_name = 'invfreqw' + \
+               '_' + args.solver + \
+               '_{:1.0e}'.format(args.lr) + \
+               '_' + loss_suffix + \
+               '_{:d}b'.format(args.batch_size) + \
+               '_{:d}d'.format(args.h_dims) + \
+               '_{:d}l'.format(args.h_layers) + \
+               '_' + args.activation + \
+               '_' + '_'.join(args.features)
 
     if 'WVEC' in args.features:
         if args.fasttext:
@@ -217,10 +226,14 @@ if __name__ == '__main__':
             net.parameters(),
             lr=args.lr
             )
-        scheduler = torch.optim.lr_scheduler.StepLR(
+        # scheduler = torch.optim.lr_scheduler.StepLR(
+        #     optimizer,
+        #     step_size=1,
+        #     gamma=0.9
+        #     )
+        scheduler = torch.optim.lr_scheduler.LambdaLR(
             optimizer,
-            step_size=1,
-            gamma=0.9
+            lr_lambda=[lambda epoch: 0.9**min(max(0, (epoch - 4) // 2), 36)],
             )
     elif args.solver == 'ADAMW':
         optimizer = torch.optim.AdamW(
@@ -235,8 +248,16 @@ if __name__ == '__main__':
 
     logging.info('Initializing loss functions.')
     if args.loss_function == 'FL':
-        focal_frame_loss = FocalLoss(gamma=5., alpha=None, size_average=True)
-        focal_role_loss = FocalLoss(gamma=5., alpha=None, size_average=True)
+        focal_frame_loss = FocalLoss(
+                gamma=args.loss_gamma,
+                alpha=FRAME_WEIGHTS,
+                size_average=True
+                )
+        focal_role_loss = FocalLoss(
+                gamma=args.loss_gamma,
+                alpha=ROLE_WEIGHTS,
+                size_average=True
+                )
     elif args.loss_function == 'CE':
         pass
 
@@ -296,14 +317,14 @@ if __name__ == '__main__':
                 loss_frame = F.cross_entropy(
                         logits_frame.view(1, 2, -1),
                         target.view(1, -1),
-                        encoded_frame_weights.view(1, -1))
+                        FRAME_WEIGHTS.view(1, -1))
 
                 target = g.ndata['role']
                 logits_role = logits_role.transpose(0, 1)
                 loss_role = F.cross_entropy(
                         logits_role.view(1, 21, -1),
                         target.view(1, -1),
-                        encoded_role_weights.view(1, -1))
+                        ROLE_WEIGHTS.view(1, -1))
 
             elif args.loss_function == 'FL':
                 target = g.ndata['frame'].view(-1)
@@ -328,8 +349,8 @@ if __name__ == '__main__':
 
             # diagnostics
             word_count = word_count + len(g)
-            writer.add_scalar('wf', torch.exp(-1 * net.loss_a), word_count)
-            writer.add_scalar('wr', torch.exp(-1 * net.loss_b), word_count)
+            # writer.add_scalar('wf', torch.exp(-1 * net.loss_a), word_count)
+            # writer.add_scalar('wr', torch.exp(-1 * net.loss_b), word_count)
             writer.add_scalar('loss_frame', loss_frame.item(), word_count)
             writer.add_scalar('loss_role', loss_role.item(), word_count)
             writer.add_scalar('loss_total', loss.item(), word_count)
@@ -344,14 +365,16 @@ if __name__ == '__main__':
                       'AccR {:.4f} |'.format(accR),
                       'words/sec {:4.3f}'.format(len(g) / dur)
                       )
-                figure = plt.figure(figsize=[10., 10.])
-                labels = frame_codec.classes_
+
                 fmt = ".0f"
-                sns.heatmap(
-                        conf_F, fmt=fmt, annot=True, cbar=False, cmap="Greens",
-                        xticklabels=labels, yticklabels=labels
-                        )
-                writer.add_figure('confusion_matrix-Frame', figure, word_count)
+
+                # figure = plt.figure(figsize=[10., 10.])
+                # labels = frame_codec.classes_
+                # sns.heatmap(
+                #         conf_F, fmt=fmt, annot=True, cbar=False, cmap="Greens",
+                #         xticklabels=labels, yticklabels=labels
+                #         )
+                # writer.add_figure('confusion_matrix-Frame', figure, word_count)
 
                 figure = plt.figure(figsize=[10., 10.])
                 labels = role_codec.classes_
@@ -365,21 +388,15 @@ if __name__ == '__main__':
                 writer.add_scalar('accuracy_frame', accF, word_count)
 
                 for name, param in net.state_dict().items():
-                    if param.dtype == torch.int64:
-                        writer.add_scalar(
-                                'norm_' + name,
-                                torch.norm(param.float()),
-                                word_count
-                                )
-                    else:
-                        writer.add_scalar(
-                                'norm_' + name,
-                                torch.norm(param),
-                                word_count
-                                )
+                    writer.add_scalar(
+                            'norm_' + name,
+                            torch.norm(param.float()),
+                            word_count
+                            )
 
                 # Save best-until-now model
                 if epoch > 0 and accR > best_model_accuracy:
+                    logging.info('Saving new best model at step {:09d}'.format(word_count))
                     best_model_accuracy = accR
                     args.word_count = word_count
                     save_model_with_args(net, args)
@@ -392,11 +409,16 @@ if __name__ == '__main__':
         save_model_with_args(net, args)
         print('Epoch {} done'.format(epoch))
 
-        scheduler.step()
         writer.add_scalar(
                 'learning_rate',
                 optimizer.param_groups[0]['lr'],
                 word_count-1
+                )
+        scheduler.step()
+        writer.add_scalar(
+                'learning_rate',
+                optimizer.param_groups[0]['lr'],
+                word_count+1
                 )
 
     save_model_with_args(net, args)

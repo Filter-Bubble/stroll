@@ -181,9 +181,10 @@ class ConlluDataset(Dataset):
             elif len(line) == 0:
                 # newline means end of a sentence
                 if len(sentence) > 0:
-
-                    # add the finished sentence to the dataset
                     self.sentences.append(sentence)
+                    # add the finished sentence to the dataset
+                    # if is_ok(sentence):
+                    #     self.sentences.append(sentence)
 
                 # start a new sentence
                 sentence = Sentence()

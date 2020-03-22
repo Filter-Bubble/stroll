@@ -6,7 +6,7 @@ import dgl.function as fn
 
 import numpy as np
 from sklearn.metrics import confusion_matrix, classification_report
-from sklearn.metrics import balanced_accuracy_score
+from sklearn.metrics import f1_score
 
 from .labels import role_codec, frame_codec
 
@@ -28,9 +28,14 @@ class MLP(nn.Module):
         layers = []
         for i in range(self.h_layers-1):
             layer = nn.Linear(self.in_feats, self.in_feats)
-            nn.init.xavier_uniform_(
+            #nn.init.xavier_uniform_(
+            #        layer.weight,
+            #        nn.init.calculate_gain('relu')
+            #        )
+            nn.init.kaiming_uniform_(
                     layer.weight,
-                    nn.init.calculate_gain('sigmoid')
+                    mode='fan_in',
+                    nonlinearity='relu'
                     )
             layers.append(layer)
 
@@ -47,9 +52,14 @@ class MLP(nn.Module):
             layers.append(layer)
 
         layer = nn.Linear(self.in_feats, self.out_feats)
-        nn.init.xavier_uniform_(
+        #nn.init.xavier_uniform_(
+        #        layer.weight,
+        #        nn.init.calculate_gain('relu')
+        #        )
+        nn.init.kaiming_uniform_(
                 layer.weight,
-                nn.init.calculate_gain('sigmoid')
+                mode='fan_in',
+                nonlinearity='relu'
                 )
         layers.append(layer)
 
@@ -250,28 +260,12 @@ class Net(nn.Module):
         self.out_feats_b = out_feats_b
         self.activation = activation
 
-        layers = []
-
-        # Linear transform of one-hot-encoding to internal representation
-        layer = nn.Linear(self.in_feats, self.h_dims)
-        nn.init.xavier_uniform_(
-                layer.weight,
-                nn.init.calculate_gain('relu')
+        # Embedding
+        self.embedding = MLP(
+                in_feats=self.in_feats,
+                out_feats=self.h_dims,
+                h_layers=2
                 )
-        layers.append(layer)
-
-        # Batchnorm
-        layer = nn.BatchNorm1d(self.h_dims)
-        layers.append(layer)
-
-        # Activation
-        if self.activation == 'relu':
-            layer = nn.ReLU()
-        elif self.activation == 'tanhshrink':
-            layer = nn.Tanhshrink()
-        layers.append(layer)
-
-        self.embedding = nn.Sequential(*layers)
 
         # Hidden layers, each of h_dims to h_dims
         self.kernel = RGCNGRU(
@@ -279,18 +273,6 @@ class Net(nn.Module):
                 out_feats=self.h_dims,
                 num_layers=self.h_layers
                 )
-
-        # rgcn_layers = []
-        # for i in range(self.h_layers):
-        #     rgcn_layers.append(
-        #             RGCN(
-        #                 in_feats=self.h_dims,
-        #                 out_feats=self.h_dims,
-        #                 activation=self.activation,
-        #                 skip=True
-        #                 )
-        #             )
-        # self.kernel = nn.Sequential(*rgcn_layers)
 
         # a MLP per task
         self.task_a = MLP(
@@ -328,8 +310,10 @@ class Net(nn.Module):
             targets_F = g.ndata['frame']
             targets_R = g.ndata['role']
 
-            acc_F = balanced_accuracy_score(targets_F, pred_F)
-            acc_R = balanced_accuracy_score(targets_R, pred_R)
+            acc_F = f1_score(targets_F, pred_F,
+                    average='macro', zero_division=0)
+            acc_R = f1_score(targets_R, pred_R,
+                    average='macro', zero_division=0)
 
             pred_frames = frame_codec.inverse_transform(pred_F)
             target_frames = frame_codec.inverse_transform(targets_F)
@@ -341,11 +325,11 @@ class Net(nn.Module):
 
             normalize = 'true'  # 'true': normalize wrt. the true label count
             conf_F = 100. * confusion_matrix(
-                    pred_F, targets_F,
+                    targets_F, pred_F,
                     normalize=normalize, labels=np.arange(2)
                     )
             conf_R = 100. * confusion_matrix(
-                    pred_R, targets_R,
+                    targets_R, pred_R,
                     normalize=normalize, labels=np.arange(21)
                     )
 
