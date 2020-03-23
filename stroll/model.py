@@ -11,7 +11,49 @@ from sklearn.metrics import f1_score
 from .labels import role_codec, frame_codec
 
 
+class Embedding(nn.Module):
+    """ Linear -> BatchNorm -> Activation"""
+    def __init__(
+            self,
+            in_feats=64,
+            out_feats=64,
+            activation='relu'
+            ):
+        super(Embedding, self).__init__()
+        self.in_feats = in_feats
+        self.out_feats = out_feats
+        self.activation = activation
+
+        layers = []
+
+        layer = nn.Linear(self.in_feats, self.out_feats)
+        nn.init.kaiming_uniform_(
+                layer.weight,
+                mode='fan_in',
+                nonlinearity='relu'
+                )
+        layers.append(layer)
+
+        layer = nn.BatchNorm1d(self.out_feats)
+        layers.append(layer)
+
+        if self.activation == 'relu':
+            layer = nn.ReLU()
+        elif self.activation == 'tanhshrink':
+            layer = nn.Tanhshrink()
+        else:
+            print('Activation function not implemented.')
+            sys.exit(-1)
+        layers.append(layer)
+
+        self.fc = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.fc(x)
+
+
 class MLP(nn.Module):
+    """[Linear -> BatchNorm -> Activation] x (n-1) -> Linear"""
     def __init__(
             self,
             in_feats=64,
@@ -28,10 +70,10 @@ class MLP(nn.Module):
         layers = []
         for i in range(self.h_layers-1):
             layer = nn.Linear(self.in_feats, self.in_feats)
-            #nn.init.xavier_uniform_(
-            #        layer.weight,
-            #        nn.init.calculate_gain('relu')
-            #        )
+            # nn.init.xavier_uniform_(
+            #         layer.weight,
+            #         nn.init.calculate_gain('relu')
+            #         )
             nn.init.kaiming_uniform_(
                     layer.weight,
                     mode='fan_in',
@@ -52,10 +94,10 @@ class MLP(nn.Module):
             layers.append(layer)
 
         layer = nn.Linear(self.in_feats, self.out_feats)
-        #nn.init.xavier_uniform_(
-        #        layer.weight,
-        #        nn.init.calculate_gain('relu')
-        #        )
+        # nn.init.xavier_uniform_(
+        #         layer.weight,
+        #         nn.init.calculate_gain('relu')
+        #         )
         nn.init.kaiming_uniform_(
                 layer.weight,
                 mode='fan_in',
@@ -261,10 +303,9 @@ class Net(nn.Module):
         self.activation = activation
 
         # Embedding
-        self.embedding = MLP(
+        self.embedding = Embedding(
                 in_feats=self.in_feats,
-                out_feats=self.h_dims,
-                h_layers=2
+                out_feats=self.h_dims
                 )
 
         # Hidden layers, each of h_dims to h_dims
@@ -276,10 +317,14 @@ class Net(nn.Module):
 
         # a MLP per task
         self.task_a = MLP(
-                in_feats=self.h_dims, out_feats=out_feats_a, h_layers=2
+                in_feats=self.h_dims,
+                out_feats=out_feats_a,
+                h_layers=2
                 )
         self.task_b = MLP(
-                in_feats=self.h_dims, out_feats=out_feats_b, h_layers=2
+                in_feats=self.h_dims,
+                out_feats=out_feats_b,
+                h_layers=2
                 )
 
         # Weight factors for combining the two losses
@@ -311,9 +356,9 @@ class Net(nn.Module):
             targets_R = g.ndata['role']
 
             acc_F = f1_score(targets_F, pred_F,
-                    average='macro', zero_division=0)
+                             average='macro', zero_division=0)
             acc_R = f1_score(targets_R, pred_R,
-                    average='macro', zero_division=0)
+                             average='macro', zero_division=0)
 
             pred_frames = frame_codec.inverse_transform(pred_F)
             target_frames = frame_codec.inverse_transform(targets_F)

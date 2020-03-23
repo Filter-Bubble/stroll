@@ -153,7 +153,7 @@ if __name__ == '__main__':
     else:
         loss_suffix += 'cst'
 
-    exp_name = 'invfreqw' + \
+    exp_name = 'invfreqw_mlpb' + \
                '_' + args.solver + \
                '_{:1.0e}'.format(args.lr) + \
                '_' + loss_suffix + \
@@ -250,12 +250,12 @@ if __name__ == '__main__':
     if args.loss_function == 'FL':
         focal_frame_loss = FocalLoss(
                 gamma=args.loss_gamma,
-                alpha=FRAME_WEIGHTS,
+                alpha=None,  # FRAME_WEIGHTS,
                 size_average=True
                 )
         focal_role_loss = FocalLoss(
                 gamma=args.loss_gamma,
-                alpha=ROLE_WEIGHTS,
+                alpha=None,  # ROLE_WEIGHTS,
                 size_average=True
                 )
     elif args.loss_function == 'CE':
