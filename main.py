@@ -15,7 +15,7 @@ from stroll.model import Net
 from stroll.labels import BertEncoder, FasttextEncoder
 from stroll.labels import FRAME_WEIGHTS, ROLE_WEIGHTS, \
         frame_codec, role_codec
-from stroll.focalloss import FocalLoss
+from stroll.focalloss import FocalLoss, Bhattacharyya
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -98,7 +98,7 @@ if __name__ == '__main__':
             '--loss_function',
             dest='loss_function',
             default='CE',
-            choices=['CE', 'FL'],
+            choices=['CE', 'FL', 'FD'],
             help='Type of loss function (cross entry / focal loss)',
             )
     parser.add_argument(
@@ -145,6 +145,8 @@ if __name__ == '__main__':
 
     if args.loss_function == 'FL':
         loss_suffix = 'FL{}'.format(args.loss_gamma)
+    elif args.loss_function == 'FD':
+        loss_suffix = 'FD{}'.format(args.loss_gamma)
     else:
         loss_suffix = 'CE'
 
@@ -153,7 +155,7 @@ if __name__ == '__main__':
     else:
         loss_suffix += 'cst'
 
-    exp_name = 'invfreqw_mlpb' + \
+    exp_name = 'ba2' + \
                '_' + args.solver + \
                '_{:1.0e}'.format(args.lr) + \
                '_' + loss_suffix + \
@@ -258,6 +260,13 @@ if __name__ == '__main__':
                 alpha=None,  # ROLE_WEIGHTS,
                 size_average=True
                 )
+    elif args.loss_function == 'FD':
+        focal_frame_loss = FocalLoss(
+                gamma=args.loss_gamma,
+                alpha=None,  # FRAME_WEIGHTS,
+                size_average=True
+                )
+        focal_role_loss = Bhattacharyya()
     elif args.loss_function == 'CE':
         pass
 
@@ -326,7 +335,7 @@ if __name__ == '__main__':
                         target.view(1, -1),
                         ROLE_WEIGHTS.view(1, -1))
 
-            elif args.loss_function == 'FL':
+            elif args.loss_function == 'FL' or args.loss_function == 'FD':
                 target = g.ndata['frame'].view(-1)
                 logits_frame = logits_frame.transpose(0, 1)
                 loss_frame = focal_frame_loss(logits_frame.view(2, -1), target)
