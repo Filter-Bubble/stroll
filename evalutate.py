@@ -12,6 +12,8 @@ from stroll.labels import frame_codec, role_codec
 from sklearn.metrics import confusion_matrix, classification_report
 
 from progress.bar import Bar
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 parser = argparse.ArgumentParser(description='Evaluate model')
 parser.add_argument(
@@ -27,19 +29,10 @@ parser.add_argument(
         required=True
         )
 parser.add_argument(
-        '--cm_normalize',
-        choices=['true', 'pred', 'all', 'none'],
-        default='none',
-        help='Normalization for the confusion matrix.'
-        )
-parser.add_argument(
         'dataset',
         help='Evaluation dataset in conllu format',
         )
 args = parser.parse_args()
-
-if args.cm_normalize == 'none':
-    args.cm_normalize = None
 
 od = torch.load(args.model_name)
 hyperparams = od.pop('hyperparams')
@@ -76,7 +69,9 @@ net.load_state_dict(od)
 predicted_frames = []
 gold_frames = []
 
-predicted_roles = []
+predicted_roles1 = []
+predicted_roles2 = []
+predicted_roles3 = []
 gold_roles = []
 
 progbar = Bar('Evaluating', max=len(eval_set))
@@ -85,8 +80,23 @@ net.eval()
 with torch.no_grad():
     for g in evalloader:
         lf, lr = net(g)
+        lowest = torch.min(lr)
+
+        # Get best frame
         _, pf = torch.max(lf, dim=1)
-        _, pr = torch.max(lr, dim=1)
+
+        # Get best role, and set its score to zero
+        _, pr1st = torch.max(lr, dim=1)
+        for i in range(len(g)):
+            lr[i, pr1st[i]] = lowest.item()
+
+        # Get second best role, and set its score to zero
+        _, pr2nd = torch.max(lr, dim=1)
+        for i in range(len(g)):
+            lr[i, pr2nd[i]] = lowest.item()
+
+        # Get third best role
+        _, pr3rd = torch.max(lr, dim=1)
 
         gf = g.ndata['frame']
         gr = g.ndata['role']
@@ -94,35 +104,14 @@ with torch.no_grad():
         predicted_frames += frame_codec.inverse_transform(pf).tolist()
         gold_frames += frame_codec.inverse_transform(gf).tolist()
 
-        predicted_roles += role_codec.inverse_transform(pr).tolist()
+        predicted_roles1 += role_codec.inverse_transform(pr1st).tolist()
+        predicted_roles2 += role_codec.inverse_transform(pr2nd).tolist()
+        predicted_roles3 += role_codec.inverse_transform(pr3rd).tolist()
         gold_roles += role_codec.inverse_transform(gr).tolist()
 
         progbar.next(args.batch_size)
 
 progbar.finish()
-
-print('Frames')
-print(confusion_matrix(
-    gold_frames, predicted_frames, normalize=args.cm_normalize
-    ))
-
-print('\n')
-
-print(classification_report(gold_frames, predicted_frames))
-
-print('\n -- \n')
-
-print('Roles')
-print(confusion_matrix(
-    gold_roles, predicted_roles, normalize=args.cm_normalize
-    ))
-
-print('\n')
-
-print(classification_report(gold_roles, predicted_roles))
-
-
-print('Roles - simplified')
 
 main_args = ['Arg0', 'Arg1', 'Arg2', 'Arg3', 'Arg4', 'Arg5']
 reduced_gold = []
@@ -135,7 +124,7 @@ for label in gold_roles:
         reduced_gold.append('Mod')
 
 reduced_pred = []
-for label in predicted_roles:
+for label in predicted_roles1:
     if label in main_args:
         reduced_pred.append('Arg')
     elif label == '_':
@@ -143,10 +132,80 @@ for label in predicted_roles:
     else:
         reduced_pred.append('Mod')
 
-print(confusion_matrix(
-    reduced_gold, reduced_pred, normalize=args.cm_normalize
-    ))
+norm = None
+labels = role_codec.classes_
+conf_frames = confusion_matrix(gold_frames, predicted_frames, normalize=norm)
+conf_roles1 = confusion_matrix(gold_roles, predicted_roles1, labels=labels, normalize=norm)
+conf_roles2 = confusion_matrix(gold_roles, predicted_roles2, labels=labels, normalize=norm)
+conf_roles3 = confusion_matrix(gold_roles, predicted_roles3, labels=labels, normalize=norm)
+conf_reduced = confusion_matrix(reduced_gold, reduced_pred, normalize=norm)
 
-print('\n')
+#
 
+print(classification_report(gold_frames, predicted_frames))
+print(classification_report(gold_roles, predicted_roles1))
 print(classification_report(reduced_gold, reduced_pred))
+
+print('\n -- \n')
+
+print('Frames')
+print(conf_frames)
+print('Roles - best')
+print(conf_roles1)
+print('\n')
+print('Roles - second')
+print(conf_roles2)
+print('\n')
+print('Roles - third')
+print(conf_roles3)
+print('\n')
+print('Roles - simplified')
+print(conf_reduced)
+
+# Calculate the normalized confusion matrix
+norm = 'true'
+conf_frames = confusion_matrix(gold_frames, predicted_frames, normalize=norm)
+conf_roles1 = confusion_matrix(gold_roles, predicted_roles1, labels=labels, normalize=norm)
+conf_roles2 = confusion_matrix(gold_roles, predicted_roles2, labels=labels, normalize=norm)
+conf_roles3 = confusion_matrix(gold_roles, predicted_roles3, labels=labels, normalize=norm)
+conf_reduced = confusion_matrix(reduced_gold, reduced_pred, normalize=norm)
+
+# take the model fileanme (without pt) as figure name
+fmt = "3.0f"
+fig_name = args.model_name[0:-2]
+
+figure = plt.figure(figsize=[10., 10.])
+sns.heatmap(
+        100. * conf_roles1, fmt=fmt, annot=True, cbar=False,
+        cmap="Greens", xticklabels=labels, yticklabels=labels
+        )
+plt.savefig(fig_name + 'roles1.png')
+
+figure = plt.figure(figsize=[10., 10.])
+sns.heatmap(
+        100. * conf_roles2, fmt=fmt, annot=True, cbar=False,
+        cmap="Greens", xticklabels=labels, yticklabels=labels
+        )
+plt.savefig(fig_name + 'roles2.png')
+
+figure = plt.figure(figsize=[10., 10.])
+sns.heatmap(
+        100. * conf_roles3, fmt=fmt, annot=True, cbar=False,
+        cmap="Greens", xticklabels=labels, yticklabels=labels
+        )
+plt.savefig(fig_name + 'roles3.png')
+
+figure = plt.figure(figsize=[10., 10.])
+sns.heatmap(
+        100. * conf_reduced, fmt=fmt, annot=True, cbar=False, cmap="Greens",
+        xticklabels=['Arg', 'ArgM', '_'], yticklabels=['Arg', 'Mod', '_']
+        )
+plt.savefig(fig_name + 'roles_red.png')
+
+figure = plt.figure(figsize=[10., 10.])
+labels = frame_codec.classes_
+sns.heatmap(
+        100. * conf_frames, fmt=fmt, annot=True, cbar=False, cmap="Greens",
+        xticklabels=labels, yticklabels=labels
+        )
+plt.savefig(fig_name + 'frames.png')
