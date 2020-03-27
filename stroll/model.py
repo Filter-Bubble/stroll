@@ -12,7 +12,7 @@ from .labels import role_codec, frame_codec
 
 
 class Embedding(nn.Module):
-    """ Linear -> BatchNorm -> Activation"""
+    """Linear -> BatchNorm -> Activation"""
     def __init__(
             self,
             in_feats=64,
@@ -70,10 +70,6 @@ class MLP(nn.Module):
         layers = []
         for i in range(self.h_layers-1):
             layer = nn.Linear(self.in_feats, self.in_feats)
-            # nn.init.xavier_uniform_(
-            #         layer.weight,
-            #         nn.init.calculate_gain('relu')
-            #         )
             nn.init.kaiming_uniform_(
                     layer.weight,
                     mode='fan_in',
@@ -94,10 +90,6 @@ class MLP(nn.Module):
             layers.append(layer)
 
         layer = nn.Linear(self.in_feats, self.out_feats)
-        # nn.init.xavier_uniform_(
-        #         layer.weight,
-        #         nn.init.calculate_gain('relu')
-        #         )
         nn.init.kaiming_uniform_(
                 layer.weight,
                 mode='fan_in',
@@ -133,10 +125,6 @@ class RGCN(nn.Module):
         self.weight = nn.Parameter(
                 torch.Tensor(3, self.in_feats, self.out_feats)
                 )
-        # nn.init.xavier_uniform_(
-        #         self.weight,
-        #         gain=nn.init.calculate_gain('relu')
-        #         )
         nn.init.kaiming_uniform_(
                 self.weight,
                 mode='fan_in',

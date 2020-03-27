@@ -191,3 +191,5 @@ The best model was after 6628920 words, or 15 epochs.
 7. [The CoNLL-2009 shared task: syntactic and semantic dependencies in multiple languages](https://dl.acm.org/doi/10.5555/1596409.1596411)
 8. [2009 Shared task evaluation script](https://ufal.mff.cuni.cz/conll2009-st/scorer.html)
 9. [Super-Convergence: Very Fast Training of NeuralNetworks Using Large Learning Rates](https://arxiv.org/abs/1708.07120)
+10. [Label Distribution Learning](https://arxiv.org/abs/1408.6027)
+11. [On Loss Functions for Deep Neural Networks in Classification](https://arxiv.org/abs/1702.05659)

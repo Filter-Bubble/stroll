@@ -51,48 +51,39 @@ ROLES = [
         '_'
         ]
 
-ROLE_WEIGHTS = torch.Tensor([ # 3652
-     0.500,  # 0.5,  # Arg0              18026,
-     0.291,  # 0.5,  # Arg1              30935,
-     1.298,  # 1.5,  # Arg2              6944,    1.5   1.5 2
-     9.000,  # 2.0,  # Arg3              502,
-     9.000,  # 2.0,  # Arg4              594,
-     0.001,  # 2.0,  # Arg5              2,
-     1.801,  # 2.0,  # ArgM-ADV          5005,
-     5.811,  # 2.0,  # ArgM-CAU          1551,
-     9.000,  # 2.0,  # ArgM-DIR          548,
-     1.711,  # 2.0,  # ArgM-DIS          5267,
-     9.000,  # 2.0,  # ArgM-EXT          912,
-     1.354,  # 1.8,  # ArgM-LOC          6657,    1.8   2   2
-     1.866,  # 1.8,  # ArgM-MNR          4831,    1.8   2   2
-     1.549,  # 2.0,  # ArgM-MOD          5818,
-     3.120,  # 2.0,  # ArgM-NEG          2889,
-     5.112,  # 2.0,  # ArgM-PNC          1763,
-     7.892,  # 2.0,  # ArgM-PRD          1142,
-     7.645,  # 2.0,  # ArgM-REC          1179,
-     0.001,  # 2.0,  # ArgM-STR          5,
-     0.907,  # 2.0,  # ArgM-TMP          9939,
-     0.023,  # 2e-2,  # _                386898   2e-3 1e-3 1e-4
+# The diagonal corresponds to predictiong the correct label
+# Labels 0 - 4 are Arg[0-5], and are similar
+# Labels 5 - 19 are ArgM, and are similar
+ROLES_TARGET_DISTRIBUTION = torch.eye(21)
+ROLES_TARGET_DISTRIBUTION[0:6, 0:6] += 0.01
+ROLES_TARGET_DISTRIBUTION[6:20, 6:20] += 0.01
+
+ROLE_WEIGHTS = torch.Tensor([
+     0.500,  # Arg0              18026
+     0.291,  # Arg1              30935
+     1.298,  # Arg2              6944
+     9.000,  # Arg3              502
+     9.000,  # Arg4              594
+     0.001,  # Arg5              2
+     1.801,  # ArgM-ADV          5005
+     5.811,  # ArgM-CAU          1551
+     9.000,  # ArgM-DIR          548
+     1.711,  # ArgM-DIS          5267
+     9.000,  # ArgM-EXT          912
+     1.354,  # ArgM-LOC          6657
+     1.866,  # ArgM-MNR          4831
+     1.549,  # ArgM-MOD          5818
+     3.120,  # ArgM-NEG          2889
+     5.112,  # ArgM-PNC          1763
+     7.892,  # ArgM-PRD          1142
+     7.645,  # ArgM-REC          1179
+     0.001,  # ArgM-STR          5
+     0.907,  # ArgM-TMP          9939
+     0.023,  # _               386898
      ])
-# ROLE_WEIGHTS = [
-#     2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
-#     0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
-#     1e-4,
-#     ]
-# ROLE_COUNTS = torch.Tensor([
-#    18026, 30935, 6944, 502, 594, 2,
-#    5005, 1551, 548, 5267, 912, 6657, 4831,
-#    5818, 2889, 1763, 1142, 1179, 5, 9939,
-#    386898
-#    ])
-# ROLE_WEIGHTS = 1.0 / ROLE_COUNTS
-# ROLE_WEIGHTS = 21.0 * ROLE_WEIGHTS / ROLE_WEIGHTS.sum()
 
 # NOTE: the alphabetical ordering is important to keep correct weights
 FRAMES = ['_', 'rel']
-# FRAME_COUNTS = torch.Tensor([454921, 36486])
-# FRAME_WEIGHTS = 1.0 / FRAME_COUNTS
-# FRAME_WEIGHTS = FRAME_WEIGHTS / FRAME_WEIGHTS.sum()
 FRAME_WEIGHTS = torch.Tensor([1., 10.])
 
 upos_codec = LabelEncoder().fit(UPOS)
@@ -104,7 +95,7 @@ role_codec = LabelEncoder().fit(ROLES)
 
 
 def to_one_hot(codec, values):
-    if type(values) == type([]):
+    if isinstance(values, (type([]), torch.Tensor)):
         value_idxs = codec.transform(values)
         return torch.eye(len(codec.classes_))[value_idxs].sum(axis=0)
     else:
@@ -189,7 +180,7 @@ class BertEncoder:
 
                 bert_i = bert_i + 1
 
-            # average and append to OUtput
+            # average and append to output
             try:
                 word_vectors.append(
                         torch.mean(torch.stack(subword_tensors, dim=1), 1)
