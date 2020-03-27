@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import random_split
 
 from stroll.conllu import ConlluDataset
 
@@ -21,19 +21,17 @@ with open('train.conllu', 'w') as f:
     for s in train_set:
         f.write(s.__repr__() + '\n\n')
 
-print ('Total length', len(sonar))
-print ('Test length', test_length)
-print ('Train length', train_length)
-
-
+print('Total length', len(sonar))
+print('Test length', test_length)
+print('Train length', train_length)
 
 test = ConlluDataset('test.conllu', features=[])
 quick_length = int(0.10 * len(test))
 remainder = len(test) - quick_length
 
-print ('Test length', len(test))
-print ('Quick length', quick_length)
-print ('Remainder', remainder)
+print('Test length', len(test))
+print('Quick length', quick_length)
+print('Remainder', remainder)
 
 quick_set, _ = random_split(test, [quick_length, remainder])
 
