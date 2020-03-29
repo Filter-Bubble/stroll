@@ -193,3 +193,4 @@ The best model was after 6628920 words, or 15 epochs.
 9. [Super-Convergence: Very Fast Training of NeuralNetworks Using Large Learning Rates](https://arxiv.org/abs/1708.07120)
 10. [Label Distribution Learning](https://arxiv.org/abs/1408.6027)
 11. [On Loss Functions for Deep Neural Networks in Classification](https://arxiv.org/abs/1702.05659)
+12. [Training Products of Experts by Minimizing Contrastive Divergence](https://www.mitpressjournals.org/doi/10.1162/089976602760128018)

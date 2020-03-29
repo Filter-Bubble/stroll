@@ -54,9 +54,9 @@ ROLES = [
 # The diagonal corresponds to predictiong the correct label
 # Labels 0 - 4 are Arg[0-5], and are similar
 # Labels 5 - 19 are ArgM, and are similar
-ROLES_TARGET_DISTRIBUTION = torch.eye(21)
-ROLES_TARGET_DISTRIBUTION[0:6, 0:6] += 0.01
-ROLES_TARGET_DISTRIBUTION[6:20, 6:20] += 0.01
+ROLE_TARGET_DISTRIBUTIONS = torch.eye(21)
+ROLE_TARGET_DISTRIBUTIONS[0:6, 0:6] += 0.01
+ROLE_TARGET_DISTRIBUTIONS[6:20, 6:20] += 0.01
 
 ROLE_WEIGHTS = torch.Tensor([
      0.500,  # Arg0              18026

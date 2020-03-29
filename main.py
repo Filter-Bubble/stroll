@@ -14,7 +14,8 @@ from stroll.graph import GraphDataset
 from stroll.model import Net
 from stroll.labels import FRAME_WEIGHTS, ROLE_WEIGHTS, \
         ROLE_TARGET_DISTRIBUTIONS
-from stroll.labels import BertEncoder, FasttextEncoder, role_codec
+from stroll.labels import BertEncoder, FasttextEncoder, \
+        role_codec, frame_codec
 from stroll.loss import CrossEntropy, FocalLoss, Bhattacharyya, \
         HingeSquared, KullbackLeibler
 
@@ -23,7 +24,6 @@ import seaborn as sns
 
 
 # Global arguments for dealing with Ctrl-C
-word_count = None
 writer = None
 args = None
 
@@ -80,10 +80,12 @@ def get_loss_functions(loss_function='CE', gamma=1.5):
 
     elif loss_function == 'CE':
         frame_loss = CrossEntropy(
-                alpha=FRAME_WEIGHTS.view(1, -1)
+                classes=len(frame_codec.classes_),
+                weights=FRAME_WEIGHTS.view(1, -1)
                 )
         role_loss = CrossEntropy(
-                alpha=ROLE_WEIGHTS.view(1, -1)
+                classes=len(role_codec.classes_),
+                weights=ROLE_WEIGHTS.view(1, -1)
                 )
     else:
         print('Loss function not implemented.')
@@ -131,18 +133,19 @@ def get_optimizer_and_scheduler_for_net(
         print('Solver not implemented.')
         sys.exit(-1)
 
-    return solver, scheduler
+    return optimizer, scheduler
 
 
 def train(net, trainloader, test_graph,
           combine_loss='cst',
-          epochs=60
+          epochs=60,
           ):
     # diagnostic settings
     count_per_eval = 5000
     next_eval = count_per_eval
     t0 = time.time()
     best_model_accuracy = 0.
+    word_count = args.word_count
 
     print('Start training for {:d} epochs.'.format(epochs))
 
@@ -190,6 +193,7 @@ def train(net, trainloader, test_graph,
 
             # diagnostics
             word_count += len(g)
+            args.word_count = word_count
             writer.add_scalar('loss_frame', loss_frame.item(), word_count)
             writer.add_scalar('loss_role', loss_role.item(), word_count)
             writer.add_scalar('loss_total', total_loss.item(), word_count)
@@ -248,7 +252,6 @@ def train(net, trainloader, test_graph,
 
 def save_model(model):
     d = model.state_dict()
-    args.word_count = word_count
     d['hyperparams'] = args
     name = './runs/{}/model_{:09d}.pt'.format(args.exp_name, args.word_count)
     torch.save(d, name)
@@ -280,7 +283,7 @@ parser.add_argument(
         )
 parser.add_argument(
         '--learning_rate',
-        dest='lr',
+        dest='learning_rate',
         type=float,
         default='1e-2',
         help='Initial learning rate.'
@@ -361,14 +364,14 @@ if __name__ == '__main__':
 
     exp_name = 'fba3' + \
                '_' + args.solver + \
-               '_{:1.0e}'.format(args.lr) + \
-               '_' + args.loss_function + args.loss_gamma + \
+               '_{:1.0e}'.format(args.learning_rate) + \
+               '_{}{:1.2e}'.format(args.loss_function, args.loss_gamma) + \
                args.combine_loss + \
                '_{:d}b'.format(args.batch_size) + \
                '_{:d}d'.format(args.h_dims) + \
                '_{:d}l'.format(args.h_layers) + \
                '_' + args.activation + \
-               '_' + '_'.join(args.features)
+               '_'.join(args.features)
 
     if 'WVEC' in args.features:
         if args.fasttext:
@@ -435,10 +438,11 @@ if __name__ == '__main__':
     try:
         restart = torch.load('restart.pt')
         net.load_state_dict(restart, strict=False)
-        word_count = restart['hyperparams'].word_count
         logging.info('Restart succesful.')
+        args.word_count = restart['hyperparams'].word_count
     except(FileNotFoundError):
         logging.info('Restart failed, starting from scratch.')
+        args.word_count = 0
 
     print('Tensorboard output in "{}".'.format(exp_name))
     writer = SummaryWriter('runs/' + exp_name)
@@ -454,7 +458,12 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, sigterm_handler)
     signal.signal(signal.SIGINT, sigterm_handler)
 
-    train(args.epochs)
+    train(net,
+          trainloader,
+          test_graph,
+          args.combine_loss,
+          args.epochs
+          )
 
     save_model(net)
     writer.close()

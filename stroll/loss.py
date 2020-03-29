@@ -6,13 +6,16 @@ import torch.nn.functional as F
 
 
 class CrossEntropy(nn.Module):
-    def __init__(self, weights=None):
+    def __init__(self, classes=21, weights=None):
         super(CrossEntropy, self).__init__()
         self.weights = weights
+        self.classes = classes
 
     def forward(self, input, target):
         return F.cross_entropy(
-                input.view(1, 2, -1), target.view(1, -1), self.weights
+                input.view(1, self.classes, -1),
+                target.view(1, -1),
+                self.weights
                 )
 
 
