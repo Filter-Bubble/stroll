@@ -49,9 +49,7 @@ pip install -r requirements.txt
 # Plans
 
 * Train frames and roles separately, to see effect of multi-task learning;
-* Run with similar parameters as [1]. 512 dims for the GRU cell, 128 for the role classifier;
 * Reconsider how we use the BERT wordvectors. We now first encode a whole sentence, and sum the resulting vectors per bert-token to our tokeninzation. Alternatively, per word we find the sentence part it is the head of, and encode that.
-* Tune hyperparameters (activation, layers, dimensions);
 
 
 # Best model until now
@@ -178,6 +176,25 @@ The best model was after 6628920 words, or 15 epochs.
 |    accuracy |            |          |    0.94   |  49479|
 |   macro avg |      0.71  |    0.67  |    0.68   |  49479|
 |weighted avg |      0.94  |    0.94  |    0.94   |  49479|
+
+
+# Ensemble prediction
+
+We trained several models, most of which are similarly good (or bad).
+An ensemble is a method to further increase the model performance.
+For this we need a way to combine the indenpendent classifications in a single classifier.
+A simple way is to use marjority voting: the label with the most votes wins.
+But this does not make the best use of the separate classifiers.
+We'll combine the individual label distributions in a single distribution by multiplying the distributions.
+This is known as 'conflation' (in physics), or 'product-of-experts', or a logarithmic opinion pool.
+
+## unweighted
+First we'll try an unweighted product.
+
+## weighted
+
+We are also looking into using weight factors, following the references below.
+The idea is to minimize the KL divergence of ensemble.
 
 
 # References

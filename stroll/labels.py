@@ -83,6 +83,8 @@ ROLE_WEIGHTS = torch.Tensor([
      ])
 
 # NOTE: the alphabetical ordering is important to keep correct weights
+FRAME_TARGET_DISTRIBUTIONS = torch.eye(2) + 0.01
+
 FRAMES = ['_', 'rel']
 FRAME_WEIGHTS = torch.Tensor([1., 10.])
 
