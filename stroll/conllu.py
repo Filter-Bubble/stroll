@@ -102,6 +102,7 @@ class Sentence():
         self.sent_id = sent_id
         self.full_text = full_text
         self.tokens = []
+        self._id_to_index = None
 
     def __len__(self):
         return len(self.tokens)
@@ -113,15 +114,30 @@ class Sentence():
                 '\n'.join([token.__repr__() for token in self.tokens])
 
     def __getitem__(self, index):
+        if isinstance(index, (str,)):
+            index = self.index(index)
         return self.tokens[index]
+
+    def index(self, ID):
+        if self._id_to_index is None:
+            self._build_id_to_index()
+        return self._id_to_index[ID]
 
     def __iter__(self):
         for i in range(len(self.tokens)):
             yield self.tokens[i]
 
+    def _build_id_to_index(self):
+        self._id_to_index = {}
+        for i, token in enumerate(self.tokens):
+            self._id_to_index[token.ID] = i
+
     def add(self, token):
-        if token.ID.find('.') == -1:
+        if token.ID.find('.') == -1:  # TODO: see if we can keep those tokens.
             self.tokens.append(token)
+
+        # force rebuilding of the ID lookup table
+        self._id_to_index = None
 
     def set_full_text(self, full_text):
         self.full_text = full_text
