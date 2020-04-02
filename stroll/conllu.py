@@ -1,4 +1,5 @@
 import logging
+import numpy as np
 from torch.utils.data import Dataset
 from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec, \
         frame_codec, role_codec
@@ -103,6 +104,7 @@ class Sentence():
         self.full_text = full_text
         self.tokens = []
         self._id_to_index = None
+        self._adj = None
 
     def __len__(self):
         return len(self.tokens)
@@ -132,12 +134,24 @@ class Sentence():
         for i, token in enumerate(self.tokens):
             self._id_to_index[token.ID] = i
 
+    def adjacency_matrix(self):
+        # By mulitplying a position vector by the adjacency matrix,
+        # we can do one step along the dependency arc.
+        if self._adj is None:
+            self._adj = np.zeros([len(self.tokens)]*2, dtype=np.int)
+            for token in self.tokens:
+                if token.HEAD == "0":
+                    continue
+                self._adj[self.index(token.ID), self.index(token.HEAD)] = 1
+        return np.copy(self._adj)
+
     def add(self, token):
         if token.ID.find('.') == -1:  # TODO: see if we can keep those tokens.
             self.tokens.append(token)
 
-        # force rebuilding of the ID lookup table
+        # force rebuilding of the ID lookup table and adjacency matrix
         self._id_to_index = None
+        self._adj = None
 
     def set_full_text(self, full_text):
         self.full_text = full_text

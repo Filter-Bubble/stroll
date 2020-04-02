@@ -115,4 +115,5 @@ class GraphDataset(ConlluDataset):
                     'norm': norm
                     })
 
+        g.sentence = sentence
         return g
