@@ -12,6 +12,7 @@ from stroll.model import Net
 from stroll.graph import GraphDataset
 from stroll.evaluate import evaluate
 from stroll.labels import FasttextEncoder, \
+        frame_codec, role_codec, \
         ROLE_TARGET_DISTRIBUTIONS, FRAME_TARGET_DISTRIBUTIONS
 
 import scipy as sp
@@ -130,6 +131,18 @@ class Ensemble():
 
     def __len__(self):
         return len(self.members)
+
+    def label(self, gs):
+        logitsf, logitsr = self(gs)
+        logitsf = torch.softmax(logitsf, dim=1)
+        logitsr = torch.softmax(logitsr, dim=1)
+
+        frame_chance, frame_labels = torch.max(logitsf, dim=1)
+        role_chance, role_labels = torch.max(logitsr, dim=1)
+        frame_labels = frame_codec.inverse_transform(frame_labels)
+        role_labels = role_codec.inverse_transform(role_labels)
+
+        return frame_labels, role_labels, frame_chance, role_chance
 
 
 ensemble = Ensemble()

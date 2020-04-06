@@ -332,6 +332,17 @@ class Net(nn.Module):
 
         return x_a, x_b
 
+    def label(self, gs):
+        logitsf, logitsr = self(gs)
+        logitsf = torch.softmax(logitsf, dim=1)
+        logitsr = torch.softmax(logitsr, dim=1)
+
+        frame_chance, frame_labels = torch.max(logitsf, dim=1)
+        role_chance, role_labels = torch.max(logitsr, dim=1)
+        frame_labels = frame_codec.inverse_transform(frame_labels)
+        role_labels = role_codec.inverse_transform(role_labels)
+        return frame_labels, role_labels, frame_chance, role_chance
+
     def evaluate(self, g):
         self.eval()
         with torch.no_grad():

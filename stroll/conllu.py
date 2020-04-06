@@ -43,14 +43,18 @@ class Token():
 
         # Treat fields 10 and 11 as frame and role
         # NOTE: this a private extension the to conllu format
-        if len(fields) > 9:
+        if len(fields) > 10:
             self.FRAME = fields[10]
             self.ROLE = fields[11]
+            self.pFRAME = 1.
+            self.pROLE = 1.
         else:
             self.FRAME = '_'
             self.ROLE = '_'
+            self.pFRAME = 0.
+            self.pROLE = 0.
 
-        # We also allow labelling using sentence encoders (BERT)
+        # We also allow labelling using sentence encoders (BERT/ FastText)
         self.WVEC = None
 
     def __repr__(self):
@@ -133,17 +137,6 @@ class Sentence():
         self._id_to_index = {}
         for i, token in enumerate(self.tokens):
             self._id_to_index[token.ID] = i
-
-    def adjacency_matrix(self):
-        # By mulitplying a position vector by the adjacency matrix,
-        # we can do one step along the dependency arc.
-        if self._adj is None:
-            self._adj = np.zeros([len(self.tokens)]*2, dtype=np.int)
-            for token in self.tokens:
-                if token.HEAD == "0":
-                    continue
-                self._adj[self.index(token.ID), self.index(token.HEAD)] = 1
-        return np.copy(self._adj)
 
     def add(self, token):
         if token.ID.find('.') == -1:  # TODO: see if we can keep those tokens.

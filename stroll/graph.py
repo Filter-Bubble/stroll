@@ -47,12 +47,21 @@ class GraphDataset(ConlluDataset):
         for i in range(len(self.sentences)):
             yield self[i]
 
+    def conllu(self, index):
+        if isinstance(index, dgl.DGLGraph):
+            index = index.ndata['index'][0].item()
+        return super().__getitem__(index)
+
     def __getitem__(self, index):
-        sentence = super().__getitem__(index).encode(
+        unencoded_sentence = super().__getitem__(index)
+        sentence = unencoded_sentence.encode(
                 sentence_encoder=self.sentence_encoder
                 )
 
         g = dgl.DGLGraph()
+
+        # used to get back from the graph to a sentence
+        idx = torch.Tensor([index]).long()
 
         # used to map the word ID to the node ID
         wid_to_nid = {}
@@ -79,7 +88,8 @@ class GraphDataset(ConlluDataset):
                     [token[f] for f in self.features],
                     0).view(1, -1),
                 'frame': token.FRAME,
-                'role': token.ROLE
+                'role': token.ROLE,
+                'index': idx
                 })
             wid_to_nid[token.ID] = len(g) - 1
 
@@ -115,5 +125,4 @@ class GraphDataset(ConlluDataset):
                     'norm': norm
                     })
 
-        g.sentence = sentence
         return g
