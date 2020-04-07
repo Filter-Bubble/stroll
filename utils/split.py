@@ -5,7 +5,7 @@ from stroll.conllu import ConlluDataset
 
 torch.manual_seed(43)
 
-sonar = ConlluDataset('sonar1_fixed.conllu', features=[])
+sonar = ConlluDataset('sonar1_fixed_19class.conllu')
 
 train_length = int(0.90 * len(sonar))
 test_length = len(sonar) - train_length
@@ -22,10 +22,11 @@ with open('train.conllu', 'w') as f:
         f.write(s.__repr__() + '\n\n')
 
 print('Total length', len(sonar))
+print(sonar.statistics())
 print('Test length', test_length)
 print('Train length', train_length)
 
-test = ConlluDataset('test.conllu', features=[])
+test = ConlluDataset('test.conllu')
 quick_length = int(0.10 * len(test))
 remainder = len(test) - quick_length
 

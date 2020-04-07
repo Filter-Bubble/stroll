@@ -98,7 +98,7 @@ class Ensemble():
             h_layers=params['h_layers'],  # args.h_layers,
             h_dims=params['h_dims'],
             out_feats_a=2,  # number of frames
-            out_feats_b=21,  # number of roles
+            out_feats_b=19,  # number of roles
             activation=params['activation']
             )
 
@@ -113,7 +113,7 @@ class Ensemble():
 
     def __call__(self, g):
         logp_frame = torch.zeros([len(g), 2])
-        logp_role = torch.zeros([len(g), 21])
+        logp_role = torch.zeros([len(g), 19])
 
         for frame_weight, role_weight, member in zip(
                 self.frame_weights, self.role_weights, self.members):

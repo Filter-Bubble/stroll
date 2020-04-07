@@ -8,6 +8,9 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import f1_score
+
 import dgl
 
 from stroll.graph import GraphDataset
@@ -136,6 +139,33 @@ def get_optimizer_and_scheduler_for_net(
     return optimizer, scheduler
 
 
+def evaluate(net, g):
+    net.eval()
+    with torch.no_grad():
+        frame_labels, role_labels, \
+                frame_chance, role_chance = net.label(g)
+
+        correct_frame = frame_codec.inverse_transform(g.ndata['frame'])
+        correct_role = role_codec.inverse_transform(g.ndata['role'])
+
+        acc_F = f1_score(correct_frame, frame_labels,
+                         average='macro', zero_division=0)
+        acc_R = f1_score(correct_role, role_labels,
+                         average='macro', zero_division=0)
+
+        normalize = 'true'  # 'true': normalize wrt. the true label count
+        conf_F = 100. * confusion_matrix(
+                correct_frame, frame_labels,
+                normalize=normalize
+                )
+        conf_R = 100. * confusion_matrix(
+                correct_role, role_labels,
+                normalize=normalize
+                )
+
+        return acc_F, acc_R, conf_F, conf_R
+
+
 def train(net, trainloader, test_graph,
           combine_loss='cst',
           epochs=60,
@@ -163,7 +193,7 @@ def train(net, trainloader, test_graph,
             # inputs (minibatch, C, d_1, d_2, ..., d_K)
             # target (minibatch,    d_1, d_2, ..., d_K)
             # minibatch = minibatch Size : 1
-            # C         = number of classes : 2 or 21
+            # C         = number of classes : 2 or 19
             # d_x       = extra dimensions : number of words in graph
             logits_frame, logits_role = net(g)
 
@@ -173,7 +203,7 @@ def train(net, trainloader, test_graph,
 
             target = g.ndata['role'].view(-1)
             logits_role = logits_role.transpose(0, 1)
-            loss_role = role_loss(logits_role.view(21, -1), target)
+            loss_role = role_loss(logits_role.view(19, -1), target)
 
             # add the two losses
             if combine_loss == 'dyn':
@@ -200,10 +230,8 @@ def train(net, trainloader, test_graph,
 
             if word_count > next_eval:
                 dur = time.time() - t0
-                accF, accR, conf_F, conf_R = net.evaluate(test_graph)
+                accF, accR, conf_F, conf_R = evaluate(net, test_graph)
                 print('Elements {:08d} |'.format(word_count),
-                      'LossF {:.4f} |'.format(loss_role.item()),
-                      'LossR {:.4f} |'.format(loss_frame.item()),
                       'AccF {:.4f} |'.format(accF),
                       'AccR {:.4f} |'.format(accR),
                       'words/sec {:4.3f}'.format(len(g) / dur)
@@ -362,16 +390,15 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    exp_name = 'fba3' + \
-               '_' + args.solver + \
-               '_{:1.0e}'.format(args.learning_rate) + \
-               '_{}{:1.2e}'.format(args.loss_function, args.loss_gamma) + \
-               args.combine_loss + \
-               '_{:d}b'.format(args.batch_size) + \
-               '_{:d}d'.format(args.h_dims) + \
-               '_{:d}l'.format(args.h_layers) + \
-               '_' + args.activation + \
-               '_'.join(args.features)
+    exp_name = args.solver + \
+        '_{:1.0e}'.format(args.learning_rate) + \
+        '_{}{:1.2e}'.format(args.loss_function, args.loss_gamma) + \
+        args.combine_loss + \
+        '_{:d}b'.format(args.batch_size) + \
+        '_{:d}d'.format(args.h_dims) + \
+        '_{:d}l'.format(args.h_layers) + \
+        '_' + args.activation + \
+        '_'.join(args.features)
 
     if 'WVEC' in args.features:
         if args.fasttext:
@@ -397,6 +424,7 @@ if __name__ == '__main__':
         train_set,
         batch_size=args.batch_size,
         shuffle=True,
+        num_workers=2,
         collate_fn=dgl.batch
         )
 
@@ -416,7 +444,7 @@ if __name__ == '__main__':
         h_layers=args.h_layers,
         h_dims=args.h_dims,
         out_feats_a=2,  # number of frames
-        out_feats_b=21,  # number of roles
+        out_feats_b=19,  # number of roles
         activation=args.activation
         )
     logging.info(net.__repr__())

@@ -1,5 +1,3 @@
-import matplotlib.pyplot as plt
-import networkx as nx
 import torch
 import dgl
 
@@ -8,19 +6,6 @@ from .conllu import ConlluDataset
 from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec
 
 RID_DIMS = 4
-
-
-def draw_graph(graph):
-    # label_tensor = graph.ndata['form']
-
-    ng = graph.to_networkx()
-    # NOTE: for nx the label == the node identifier.
-    # nx.relabel_nodes(ng,
-    #         lambda x: "{}:{}".format(x, tensor_to_string(label_tensor[x])),
-    #         copy=False)
-
-    nx.draw(ng, with_labels=True)
-    plt.show()
 
 
 class GraphDataset(ConlluDataset):
@@ -63,25 +48,22 @@ class GraphDataset(ConlluDataset):
         # used to get back from the graph to a sentence
         idx = torch.Tensor([index]).long()
 
-        # used to map the word ID to the node ID
-        wid_to_nid = {}
-
         # children count per wid
-        children_per_wid = {}
+        children_per_id = {}
 
         # add nodes
         for token in sentence:
             # add a relative position to the token
             # we label tokens for each head by their order in the sentence
             # ie. first-child, second-child, etc
-            if token.ID in children_per_wid:
-                children_per_wid[token.ID] += 1
-                if children_per_wid[token.ID] == RID_DIMS:
-                    children_per_wid[token.ID] = RID_DIMS - 1
+            if token.ID in children_per_id:
+                children_per_id[token.ID] += 1
+                if children_per_id[token.ID] == RID_DIMS:
+                    children_per_id[token.ID] = RID_DIMS - 1
             else:
-                children_per_wid[token.ID] = 0
+                children_per_id[token.ID] = 0
             token.RID = torch.zeros([RID_DIMS])
-            token.RID[children_per_wid[token.ID]] = 1.
+            token.RID[children_per_id[token.ID]] = 1.
 
             g.add_nodes(1, {
                 'v': torch.cat(
@@ -91,18 +73,19 @@ class GraphDataset(ConlluDataset):
                 'role': token.ROLE,
                 'index': idx
                 })
-            wid_to_nid[token.ID] = len(g) - 1
 
         # add edges: word -> head
         for token in sentence:
             if token.HEAD != '0' and token.HEAD != '_':
-                g.add_edges(wid_to_nid[token.ID], wid_to_nid[token.HEAD], {
-                    'rel_type': torch.tensor([1])
-                    })
+                g.add_edges(
+                        sentence.index(token.ID),
+                        sentence.index(token.HEAD),
+                        {'rel_type': torch.tensor([1])}
+                        )
 
         # add 1/(3 * in_degree) as a weight factor
         for token in sentence:
-            in_edges = g.in_edges(wid_to_nid[token.ID], form='eid')
+            in_edges = g.in_edges(sentence.index(token.ID), form='eid')
             if len(in_edges):
                 norm = torch.ones([len(in_edges)]) * \
                         (1.0 / (3.0 * len(in_edges)))
@@ -113,16 +96,18 @@ class GraphDataset(ConlluDataset):
         norm = torch.tensor([1.0 / 3.0])
         for token in sentence:
             # word -> word (self edge)
-            g.add_edges(wid_to_nid[token.ID], wid_to_nid[token.ID], {
-                'rel_type': torch.tensor([0]),
-                'norm': norm
-                })
+            g.add_edges(
+                    sentence.index(token.ID),
+                    sentence.index(token.ID),
+                    {'rel_type': torch.tensor([0]), 'norm': norm}
+                    )
+
             # TODO: tokens with ID's like '38.1' don't have a head.
             if token.HEAD != '0' and token.HEAD != '_':
                 # head -> word
-                g.add_edges(wid_to_nid[token.HEAD], wid_to_nid[token.ID], {
-                    'rel_type': torch.tensor([2]),
-                    'norm': norm
-                    })
-
+                g.add_edges(
+                        sentence.index(token.HEAD),
+                        sentence.index(token.ID),
+                        {'rel_type': torch.tensor([2]), 'norm': norm}
+                        )
         return g

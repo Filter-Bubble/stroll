@@ -45,16 +45,16 @@ FEATS = [
 
 # NOTE: the alphabetical ordering is important to keep correct weights
 ROLES = [
-        'Arg0', 'Arg1', 'Arg2', 'Arg3', 'Arg4', 'Arg5', 'ArgM-ADV', 'ArgM-CAU',
+        'Arg0', 'Arg1', 'Arg2', 'Arg3', 'Arg4', 'ArgM-ADV', 'ArgM-CAU',
         'ArgM-DIR', 'ArgM-DIS', 'ArgM-EXT', 'ArgM-LOC', 'ArgM-MNR', 'ArgM-MOD',
-        'ArgM-NEG', 'ArgM-PNC', 'ArgM-PRD', 'ArgM-REC', 'ArgM-STR', 'ArgM-TMP',
+        'ArgM-NEG', 'ArgM-PNC', 'ArgM-PRD', 'ArgM-REC', 'ArgM-TMP',
         '_'
         ]
 
 # The diagonal corresponds to predictiong the correct label
 # Labels 0 - 4 are Arg[0-5], and are similar
 # Labels 5 - 19 are ArgM, and are similar
-ROLE_TARGET_DISTRIBUTIONS = torch.eye(21)
+ROLE_TARGET_DISTRIBUTIONS = torch.eye(19)
 ROLE_TARGET_DISTRIBUTIONS[0:6, 0:6] += 0.01
 ROLE_TARGET_DISTRIBUTIONS[6:20, 6:20] += 0.01
 
@@ -64,7 +64,6 @@ ROLE_WEIGHTS = torch.Tensor([
      1.298,  # Arg2              6944
      9.000,  # Arg3              502
      9.000,  # Arg4              594
-     0.001,  # Arg5              2
      1.801,  # ArgM-ADV          5005
      5.811,  # ArgM-CAU          1551
      9.000,  # ArgM-DIR          548
@@ -77,7 +76,6 @@ ROLE_WEIGHTS = torch.Tensor([
      5.112,  # ArgM-PNC          1763
      7.892,  # ArgM-PRD          1142
      7.645,  # ArgM-REC          1179
-     0.001,  # ArgM-STR          5
      0.907,  # ArgM-TMP          9939
      0.023,  # _               386898
      ])

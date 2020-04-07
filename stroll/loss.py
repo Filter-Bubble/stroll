@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 
 class CrossEntropy(nn.Module):
-    def __init__(self, classes=21, weights=None):
+    def __init__(self, classes=19, weights=None):
         super(CrossEntropy, self).__init__()
         self.weights = weights
         self.classes = classes
@@ -54,9 +54,11 @@ class FocalLoss(nn.Module):
 
 
 class HingeSquared(nn.Module):
-    def __init__(self):
+    def __init__(self, dims=19):
         super(HingeSquared, self).__init__()
-        self.yhat = 2 * torch.eye(21) - torch.ones([21, 21])
+        self.dims = dims
+        self.yhat = 2 * torch.eye(self.dims) - \
+            torch.ones([self.dims, self.dims])
 
     def forward(self, input, target):
         """Input shape [C,N], target shape [N]"""
@@ -73,15 +75,6 @@ class HingeSquared(nn.Module):
 class KullbackLeibler(nn.Module):
     def __init__(self, target_distribution=None):
         super(KullbackLeibler, self).__init__()
-        # The desired distribution peaks at the right label
-        d = torch.eye(21)
-
-        # Labels 0 - 4 are Arg[0-5], and are similar
-        d[0:6, 0:6] += 0.01
-
-        # Labels 5 - 19 are ArgM, and are similar
-        d[6:20, 6:20] += 0.01
-
         self.logq = F.log_softmax(target_distribution, dim=0)
 
     def forward(self, input, target):
@@ -108,14 +101,5 @@ class Bhattacharyya(nn.Module):
         p = F.softmax(input, dim=0)
         spq_N = torch.sum(torch.sqrt(p * q), dim=0)
         BC_N = - torch.log(spq_N)
-
-        # Try to 'focus' the loss on cases where p is different from q
-        #             similar  dissimilar
-        # spq          0.99       0.01
-        # BC           0.01       4.6
-        # (1 - spq)    0.01       0.99
-        # focussed     0.0001     4.6
-        # BC_N = - (1 - spq_N) * torch.log(spq_N)
-        # NOTE: this does not seem to do much
 
         return torch.sum(BC_N)

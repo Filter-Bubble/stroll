@@ -4,10 +4,6 @@ import torch.nn as nn
 
 import dgl.function as fn
 
-import numpy as np
-from sklearn.metrics import confusion_matrix, classification_report
-from sklearn.metrics import f1_score
-
 from .labels import role_codec, frame_codec
 
 
@@ -342,39 +338,3 @@ class Net(nn.Module):
         frame_labels = frame_codec.inverse_transform(frame_labels)
         role_labels = role_codec.inverse_transform(role_labels)
         return frame_labels, role_labels, frame_chance, role_chance
-
-    def evaluate(self, g):
-        self.eval()
-        with torch.no_grad():
-            logits_F, logits_R = self(g)
-
-            _, pred_F = torch.max(logits_F, dim=1)
-            _, pred_R = torch.max(logits_R, dim=1)
-
-            targets_F = g.ndata['frame']
-            targets_R = g.ndata['role']
-
-            acc_F = f1_score(targets_F, pred_F,
-                             average='macro', zero_division=0)
-            acc_R = f1_score(targets_R, pred_R,
-                             average='macro', zero_division=0)
-
-            pred_frames = frame_codec.inverse_transform(pred_F)
-            target_frames = frame_codec.inverse_transform(targets_F)
-            print(classification_report(target_frames, pred_frames))
-
-            pred_roles = role_codec.inverse_transform(pred_R)
-            target_roles = role_codec.inverse_transform(targets_R)
-            print(classification_report(target_roles, pred_roles))
-
-            normalize = 'true'  # 'true': normalize wrt. the true label count
-            conf_F = 100. * confusion_matrix(
-                    targets_F, pred_F,
-                    normalize=normalize, labels=np.arange(2)
-                    )
-            conf_R = 100. * confusion_matrix(
-                    targets_R, pred_R,
-                    normalize=normalize, labels=np.arange(21)
-                    )
-
-            return acc_F, acc_R, conf_F, conf_R

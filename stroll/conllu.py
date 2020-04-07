@@ -1,24 +1,9 @@
 import logging
-import numpy as np
 from torch.utils.data import Dataset
 from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec, \
         frame_codec, role_codec
 from .labels import to_one_hot, to_index
 from .labels import ROLES, FRAMES
-
-
-def is_ok(sentence):
-    # Check if the syntactic head of each argument is also a SRL Frame
-    ID_to_frame = {}
-    ID_to_frame['0'] = '_'  # for when looking at the frame of the head
-    for idx, token in enumerate(sentence):
-        ID_to_frame[token.ID] = token.FRAME
-    for token in sentence:
-        if token.ROLE != '_':
-            if ID_to_frame[token.HEAD] != 'rel':
-                print('Dropping:', sentence.sent_id)
-                return False
-    return True
 
 
 class Token():
@@ -108,19 +93,17 @@ class Sentence():
         self.full_text = full_text
         self.tokens = []
         self._id_to_index = None
-        self._adj = None
 
     def __len__(self):
         return len(self.tokens)
 
     def __repr__(self):
-        return \
-                '# sent_id = ' + self.sent_id + '\n' + \
-                '# text = ' + self.full_text + '\n' + \
-                '\n'.join([token.__repr__() for token in self.tokens])
+        return '# sent_id = ' + self.sent_id + '\n' + \
+               '# text = ' + self.full_text + '\n' + \
+               '\n'.join([token.__repr__() for token in self.tokens])
 
     def __getitem__(self, index):
-        if isinstance(index, (str,)):
+        if isinstance(index, str):
             index = self.index(index)
         return self.tokens[index]
 
@@ -139,12 +122,12 @@ class Sentence():
             self._id_to_index[token.ID] = i
 
     def add(self, token):
-        if token.ID.find('.') == -1:  # TODO: see if we can keep those tokens.
+        # TODO: see if we can keep those tokens.
+        if token.ID.find('.') == -1:
             self.tokens.append(token)
 
         # force rebuilding of the ID lookup table and adjacency matrix
         self._id_to_index = None
-        self._adj = None
 
     def set_full_text(self, full_text):
         self.full_text = full_text
@@ -205,9 +188,6 @@ class ConlluDataset(Dataset):
                 # newline means end of a sentence
                 if len(sentence) > 0:
                     self.sentences.append(sentence)
-                    # add the finished sentence to the dataset
-                    # if is_ok(sentence):
-                    #     self.sentences.append(sentence)
 
                 # start a new sentence
                 sentence = Sentence()

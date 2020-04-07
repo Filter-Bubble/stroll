@@ -51,6 +51,7 @@ if __name__ == '__main__':
     evalloader = DataLoader(
             eval_set,
             batch_size=args.batch_size,
+            num_workers=2,
             collate_fn=dgl.batch
             )
 
@@ -59,7 +60,7 @@ if __name__ == '__main__':
             h_layers=hyperparams.h_layers,
             h_dims=hyperparams.h_dims,
             out_feats_a=2,
-            out_feats_b=21,
+            out_feats_b=19,
             activation='relu'
             )
     net.load_state_dict(state_dict)
