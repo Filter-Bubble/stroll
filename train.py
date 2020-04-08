@@ -486,6 +486,7 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, sigterm_handler)
     signal.signal(signal.SIGINT, sigterm_handler)
 
+    print(net)
     train(net,
           trainloader,
           test_graph,
