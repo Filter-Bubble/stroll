@@ -90,7 +90,7 @@ class Ensemble():
 
     def load_member(self, name):
         logging.info('Loading model "{}"'.format(name))
-        state_dict = torch.load(member)
+        state_dict = torch.load(name)
         params = state_dict['hyperparams'].__dict__
 
         net = Net(
