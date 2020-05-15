@@ -1,4 +1,5 @@
 import logging
+import torch
 from torch.utils.data import Dataset
 from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec, \
         frame_codec, role_codec
@@ -78,6 +79,11 @@ class Token():
         return None
 
     def encode(self):
+        if self.COREF == '_':
+            coref = torch.tensor([-1], dtype=torch.int32)
+        else:
+            coref = torch.tensor([int(self.COREF)], dtype=torch.int32)
+
         return Token([
             self.ID,  # not encoded
             self.FORM,  # encoded later by sentence encoder
@@ -91,6 +97,7 @@ class Token():
             self.MISC,  # not encoded
             to_index(frame_codec, self.FRAME),
             to_index(role_codec, self.ROLE),
+            coref
             ], isEncoded=True)
 
 

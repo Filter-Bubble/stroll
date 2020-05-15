@@ -45,9 +45,6 @@ class GraphDataset(ConlluDataset):
 
         g = dgl.DGLGraph()
 
-        # used to get back from the graph to a sentence
-        idx = torch.Tensor([index]).long()
-
         # children count per wid
         children_per_id = {}
 
@@ -71,7 +68,8 @@ class GraphDataset(ConlluDataset):
                     0).view(1, -1),
                 'frame': token.FRAME,
                 'role': token.ROLE,
-                'index': idx
+                'coref': token.COREF,
+                'index': torch.Tensor([index]).long()
                 })
 
         # add edges: word -> head
