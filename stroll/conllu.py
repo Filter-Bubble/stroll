@@ -105,10 +105,11 @@ class Sentence():
     """A class representing a sentence,
     ie. the tokens with their annotations."""
     def __init__(self, sent_id=None, full_text=None):
-        self.sent_id = sent_id
-        self.full_text = full_text
+        self.sent_id = sent_id  # sentence identifier, string
+        self.full_text = full_text  # full (raw) text of sentence
+        self.doc_id = None
         self.tokens = []
-        self._id_to_index = None
+        self._id_to_index = None  # maps Token.ID to int index in sentence
 
     def __len__(self):
         return len(self.tokens)
@@ -168,10 +169,11 @@ class Sentence():
 
 
 class ConlluDataset(Dataset):
-    def __init__(self, filename):
+    def __init__(self, filename=None):
         self.sentences = []
 
-        self._load(filename)
+        if filename is not None:
+            self._load(filename)
 
     def _load(self, filename):
         logging.info("Opening {}".format(filename))
@@ -184,6 +186,8 @@ class ConlluDataset(Dataset):
         # <12 columns tab separated, 1 line per token in the sentence>
         # <empty line>
         sentence = Sentence()
+        doc_count = 0
+        doc_current_id = filename
         for line in conllu_raw:
 
             # remove possible trailing newline and whitespace
@@ -197,12 +201,22 @@ class ConlluDataset(Dataset):
                 # store sentence full text
                 sentence.set_full_text(line[9:])
                 continue
+            elif line[0:8] == '# newdoc':
+                # store doc id if present: '# newdoc id = mf920901-001'
+                if len(line) > 14:
+                    doc_current_id = line[14:]
+                else:
+                    doc_current_id = '{filename}-{:06d}'.format(
+                            filename, doc_count)
+                doc_count += 1
             elif line[0:1] == '#':
                 # ignore comments
                 continue
             elif len(line) == 0:
                 # newline means end of a sentence
                 if len(sentence) > 0:
+                    self.index = len(self.sentences)
+                    sentence.doc_id = doc_current_id
                     self.sentences.append(sentence)
 
                 # start a new sentence
