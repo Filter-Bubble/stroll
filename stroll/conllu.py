@@ -104,10 +104,11 @@ class Token():
 class Sentence():
     """A class representing a sentence,
     ie. the tokens with their annotations."""
-    def __init__(self, sent_id=None, full_text=None):
+    def __init__(self, sent_id=None, full_text=None, rank=None, doc_id=None):
         self.sent_id = sent_id  # sentence identifier, string
         self.full_text = full_text  # full (raw) text of sentence
-        self.doc_id = None
+        self.rank = rank
+        self.doc_id = doc_id
         self.tokens = []
         self._id_to_index = None  # maps Token.ID to int index in sentence
 
@@ -171,6 +172,7 @@ class Sentence():
 class ConlluDataset(Dataset):
     def __init__(self, filename=None):
         self.sentences = []
+        self.doc_lengths = {}
 
         if filename is not None:
             self._load(filename)
@@ -188,6 +190,7 @@ class ConlluDataset(Dataset):
         sentence = Sentence()
         doc_count = 0
         doc_current_id = filename
+        doc_sent_count = 0
         for line in conllu_raw:
 
             # remove possible trailing newline and whitespace
@@ -202,6 +205,10 @@ class ConlluDataset(Dataset):
                 sentence.set_full_text(line[9:])
                 continue
             elif line[0:8] == '# newdoc':
+                # keep track of the length of the document
+                if doc_sent_count != 0:
+                    self.doc_lengths[doc_current_id] = doc_sent_count
+
                 # store doc id if present: '# newdoc id = mf920901-001'
                 if len(line) > 14:
                     doc_current_id = line[14:]
@@ -209,15 +216,17 @@ class ConlluDataset(Dataset):
                     doc_current_id = '{filename}-{:06d}'.format(
                             filename, doc_count)
                 doc_count += 1
+                doc_sent_count = 0
             elif line[0:1] == '#':
                 # ignore comments
                 continue
             elif len(line) == 0:
                 # newline means end of a sentence
                 if len(sentence) > 0:
-                    self.index = len(self.sentences)
+                    sentence.rank = doc_sent_count
                     sentence.doc_id = doc_current_id
                     self.sentences.append(sentence)
+                    doc_sent_count += 1
 
                 # start a new sentence
                 sentence = Sentence()
