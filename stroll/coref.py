@@ -23,7 +23,7 @@ COPULA_NOUN_DESC_MOVE_TO_VERB = [
         ]
 
 ADJACENCY_SKIP_DEPREL = [
-        'parataxis', 'punct'
+        'punct'
         ]
 
 MENTION_REMOVE_DESC = [
@@ -32,20 +32,28 @@ MENTION_REMOVE_DESC = [
         'cc', 'case', 'punct'
         ]
 
+MENTION_REMOVE_LEADING = [
+        'ADP', 'ADV', 'CCONJ', 'SCONJ'
+        ]
+
 
 class Mention():
-    """A Mention
+    """
+    A Mention
 
+    Properties:
       sentence The corresponding Sentence
-      head     The ID of the mention head
-      refid    The entity this mention refers to (integer)
-
-      The span corresponding to this mention is derived from the head,
-      but processing has been done to remove syntax words.
-
+      head     The token.ID of the mention head
+      refid    The entity this mention refers to
       start    The ID of the first token of the mention
       end      The ID of the last token of the mention
       ids      The IDs of all tokens part of the mention
+
+      NOTE: The span corresponding to this mention is derived from
+      the head, but processing has been done to remove syntax words.
+      They are basically the min(ids) and max(ids).  If the language
+      allows discontinuities, the set of ids is a better representation.
+
     """
 
     def __init__(self,
@@ -61,7 +69,10 @@ class Mention():
         self.refid = refid
         self.start = start
         self.end = end
-        self.ids = ids
+        if ids:
+            self.ids = ids
+        else:
+            self.ids = []
 
     def type(self):
         """The type is one of LIST, PRONOMIAL, PROPER, NOMINAL"""
@@ -160,6 +171,7 @@ def mentions_match_relaxed(mentionA, mentionB):
     All content (NOUNs and PROPNs) words of one are included in the
     other mention.
     """
+    # TODO: token.UPOS == 'PRON'?
     sentA = mentionA.sentence
     sentB = mentionB.sentence
 
@@ -178,7 +190,7 @@ def mentions_match_relaxed(mentionA, mentionB):
     return 0.0
 
 
-def mentions_are_overlapping(mentionA, mentionB):
+def mentions_overlap(mentionA, mentionB):
     """
     The mentions are from the same sentence, and overlap in the sentence.
     """
@@ -203,7 +215,7 @@ def adjacency_matrix(sentence):
     By mulitplying a position vector by the adjacency matrix,
     we do one step along the dependency arcs.
     This is used for constructing the mention text from a head, so not all arcs
-    are useful. At the moment parataxis and punctuation arcs are ignored.
+    are useful.
     """
     L = np.zeros([len(sentence)]*2, dtype=np.int)
     for token in sentence:
@@ -216,12 +228,14 @@ def adjacency_matrix(sentence):
 
 def build_mentions_from_heads(sentence, heads):
     """
-    Build the mention text corresponding to the given head by
+    Build the mention contents from the given heads by
     gathering leaves from the subtree.  The subtree is pruned by removing all
     direct descendants with a DEPREL in a black list, MENTION_REMOVE_DESC.
     This list is based on statistics over the SoNaR dataset.
 
-    Returns a dict of Mention, indexed by the Token.ID of the mention head.
+    heads is a list of Token.ID
+
+    Returns a list of Mention
     """
     to_descendants = adjacency_matrix(sentence)
 
@@ -233,20 +247,21 @@ def build_mentions_from_heads(sentence, heads):
     is_descendant = np.linalg.matrix_power(is_descendant, len(sentence))
 
     # collect the spans
-    mentions = {}
-    for wid in heads:
+    mentions = []
+    for head in heads:
         # get all tokens that make up the subtree, by construction
-        ids, = np.where(is_descendant[:, sentence.index(wid)] > 0)
+        ids, = np.where(is_descendant[:, sentence.index(head)] > 0)
 
-        # prune direct descendants at this point by looking at the deprel to
-        # our subtree root to deal with leading 'en, ook, als, in, op, voor,
-        # bij, ...' that are not part of the mention.
-        # this works better than removing [ADV, CCONJ, SCONJ], and
+        # Prune direct descendants at this point by looking at the deprel to
+        # our subtree root.
+        # This deals with leading 'en, ook, als, in, op, voor, bij, ...'
+        # that are not part of the mention.
+        # Then remove [ADV, CCONJ, SCONJ], and
         # then [ADP, ADV] from the front.
         # Also remove empty tokens (could have been added by our preprocesing)
         ids_to_prune = []
         for token in sentence:
-            if token.HEAD == wid and token.DEPREL in MENTION_REMOVE_DESC:
+            if token.HEAD == head and token.DEPREL in MENTION_REMOVE_DESC:
                 prune, = np.where(
                         is_descendant[:, sentence.index(token.ID)] > 0
                         )
@@ -254,17 +269,41 @@ def build_mentions_from_heads(sentence, heads):
 
         pruned_ids = []
         for id in ids:
-            if id not in ids_to_prune and sentence[id].FORM != '':
+            if id not in ids_to_prune:
                 pruned_ids.append(id)
 
-        mentions[wid] = Mention(
-                head=wid,
-                sentence=sentence,
-                refid=sentence[wid].COREF,
-                start=sentence[pruned_ids[0]].ID,
-                end=sentence[pruned_ids[-1]].ID,
-                ids=[sentence[i].ID for i in pruned_ids]
+        if len(pruned_ids) == 0:
+            # malformed dependency tree
+            logging.error('Issue with token {}, sentence: {} {}'.format(
+                head, sentence.doc_id, sentence.sent_id)
                 )
+            continue
+
+        # removing leading tokens
+        if len(pruned_ids) > 1 and \
+                sentence[pruned_ids[0]].UPOS in MENTION_REMOVE_LEADING:
+            pruned_ids = pruned_ids[1:]
+
+        # we have a potential issue with the extra, empty, list tokens
+        # (they are added by transform_coordinations)
+        # When validating, empty tokens are not printed, and the span
+        # would be malformed.
+        # move the end of the span until it is not an empty token.
+        id_end = pruned_ids[-1]
+        while sentence[id_end].FORM == '':
+            id_end -= 1
+
+        if len(pruned_ids) > 0:
+            mentions.append(
+                Mention(
+                    head=head,
+                    sentence=sentence,
+                    refid=sentence[head].COREF,
+                    start=sentence[pruned_ids[0]].ID,
+                    end=sentence[id_end].ID,
+                    ids=[sentence[i].ID for i in pruned_ids]
+                    )
+            )
 
     return mentions
 
@@ -279,6 +318,7 @@ def get_mentions(sentence):
     for token in sentence:
         if token.COREF != '_':
             heads.append(token.ID)
+
     return build_mentions_from_heads(sentence, heads)
 
 
@@ -321,10 +361,6 @@ def transform_coordinations(sentence):
         for token_id in coordination:
             sentence[token_id].HEAD = tokenA.HEAD
 
-        # get a span for tokenA
-        mentions = build_mentions_from_heads(sentence, [tokenA.ID])
-        mention = mentions[tokenA.ID]
-
         # create a dummy node to represent the full coordination
         tokenX = Token([
             '{}'.format(len(sentence) + 1),  # ID
@@ -351,18 +387,7 @@ def transform_coordinations(sentence):
         tokenA.FRAME = '_'
         tokenA.ROLE = '_'
 
-        # insert the dummy token to the right of the first token
-        # that is not part of span A
-        place = sentence.index(tokenA.ID)
-        while (
-         sentence[place].ID in mention.ids or sentence[place].DEPREL == 'punct'
-         ):
-            place += 1
-            if place == len(sentence):
-                break
-
-        sentence.tokens.insert(place, tokenX)
-        sentence._build_id_to_index()
+        sentence.add(tokenX)
 
         # fix remaining issues:
         # - punctuation is a child of the root token
@@ -464,20 +489,11 @@ def transform_tree(sentence):
     return sentence
 
 
-def get_spans_from_brak_ket(sentence):
+def get_mentions_from_bra_ket(sentence):
     """
-    Get spans from the sentence' brak-ket coref annotation.
-
-    Return spans as a list of dicts:
-       refid    mention id
-       start    first Token.ID of the mention
-       end      last Token.ID of the mention
-       heads    list of Token.HEAD
-       ids      list of Token.ID
-
-    Where the list is over tokens that are gramatically part of the sentence.
+    Get mentions from the sentence' brak-ket coref annotation.
     """
-    spans = []
+    mentions = []
     for token in sentence:
         refs = token.COREF.split('|')
         for ref in refs:
@@ -489,106 +505,182 @@ def get_spans_from_brak_ket(sentence):
                 # not a mention
                 continue
 
-            # start of a mention: create a new, open, span
+            # start of a mention: create a new span
             if ms:
                 refid, = ms.groups(0)
-                spans.append({
-                        'refid': refid,
-                        'start': token.ID,
-                        'end': '_',
-                        'heads': [],
-                        'ids': []
-                        })
-            # end of a mention: close the span
+                mentions.append(Mention(
+                    sentence=sentence,
+                    refid=refid,
+                    start=token.ID,
+                    end='_'
+                    )
+                )
+
+            # end of a mention: close a span
             elif me:
                 refid, = me.groups(0)
-                spanid = len(spans) - 1
-                # find the most recent span with this refid,
+                menid = len(mentions) - 1
+                # find the most recent mention with this refid,
                 # ie. top-of-the-stack
-                while spanid >= 0 and (
-                        spans[spanid]['refid'] != refid or
-                        spans[spanid]['end'] != '_'
+                while menid >= 0 and (
+                        mentions[menid].refid != refid or
+                        mentions[menid].end != '_'
                         ):
-                    spanid -= 1
+                    menid -= 1
 
-                spans[spanid]['end'] = token.ID
+                mentions[menid].end = token.ID
 
             # single word mention
             elif mo:
                 refid, = mo.groups(0)
-                spans.append({
-                        'refid': refid,
-                        'start': token.ID,
-                        'end': token.ID,
-                        'heads': [],
-                        'ids': []
-                        })
-
-        # gather information for spans
-        for span in spans:
-            if span['end'] in ['_', token.ID]:
-                # keep a list of heads and ids to find the head later
-                if token.DEPREL != 'punct':
-                    span['heads'].append(token.HEAD)
-                    span['ids'].append(token.ID)
-
-    # sanity check: are all spans closed?
-    for span in spans:
-        if span['end'] == '_':
-            logging.error('Unclosed span found {} {} {}'.format(
-                sentence.doc_id, sentence.sent_id, span['refid'])
+                mentions.append(Mention(
+                    sentence=sentence,
+                    refid=refid,
+                    start=token.ID,
+                    end=token.ID
+                    )
                 )
 
-    return spans
+        # gather the tokens that make up the span
+        if token.DEPREL != 'punct':
+            for mention in mentions:
+                if mention.end in ['_', token.ID]:
+                    mention.ids.append(token.ID)
+
+    # sanity check: are all spans closed?
+    for mention in mentions:
+        if mention.end == '_':
+            logging.error('Unclosed mention found {} {} {}'.format(
+                sentence.doc_id, sentence.sent_id, mention.refid)
+                )
+            mention.end = sentence[-1].ID
+
+    return mentions
 
 
-def get_mentions_from_bra_ket(sentence):
+def most_similar_mention(target, candidates):
     """
-    Build the mentions from the conll file using the bra-ket notation.
-    The span's head is determined as first token with token.HEAD not
-    in [token.ID for token in span]
+    Find the head-based mention most similart to the given span,
+    based on the simple matching coefficient.
 
-    Returns a list of Mention
+        target:     the Mention to approximate
+        candidates: a list of Mention
+
+    Returns:
+
+        Mention
     """
-    spans = get_spans_from_brak_ket(sentence)
+    # shortcuts: corner cases
+    if len(candidates) == 0:
+        return None
+    elif len(candidates) == 1:
+        return candidates[0]
 
-    # find the heads for each span
-    mentions_heads = []
-    valid_mentions = []
-    for span in spans:
-        heads = span['heads']
-        ids = span['ids']
+    # score each candidate
+    best = -1.0
+    mention = None
+    for candidate in candidates:
+        current = 0
+        if candidate.sentence == target.sentence:
+            for token in target.sentence:
+                A = token.ID in target.ids
+                B = token.ID in candidate.ids
+                if A == B or token.FORM == '':
+                    current += 1
 
-        # take as head the FIRST token that has a head not part of the span
-        head_found = False
-        for i, head in enumerate(heads):
-            if head not in ids:
-                span['head'] = ids[i]
-                head_found = True
-                break
+        else:
+            # mentions from different sentence
+            current = -1
 
-        # headless mentions can occur for mentions containing only punctuation
-        if head_found:
-            if span['head'] in mentions_heads:
-                # Two spans claim the same head; conceptually something like
+        if current == len(target.sentence):
+            # shortcut: maximum score
+            return candidate
+
+        elif current > best:
+            mention = candidate
+            best = current
+
+    return mention
+
+
+def convert_mentions(mentions):
+    """
+    Convert bra-ket mentions to a head based mentions.
+
+    For each mention, look at its ids and find a syntactic head that
+    matches the span best. A head can only match a single mention, so
+    the conversion will not always work. Only succesful conversions are
+    returned.
+
+        mentions   list of Mention (bra-ket)
+
+    Returns:
+        a list of Mention (head based)
+
+    NOTE: the mentions are new objects, the original mentions are unchanged.
+    """
+    # shortcut
+    if len(mentions) == 0:
+        return []
+
+    result = []
+
+    # group the mentions by sentence
+    mentions_per_sentence = {}
+    for mention in mentions:
+        sentence = mention.sentence
+        if sentence in mentions_per_sentence:
+            mentions_per_sentence[sentence].append(mention)
+        else:
+            mentions_per_sentence[sentence] = [mention]
+
+    # process sentence by sentence
+    for sentence in mentions_per_sentence.keys():
+        # the candidate spans:
+        # all possible subtrees except punctuation
+        heads_to_try = []
+        for token in sentence:
+            if token.DEPREL != 'punct':
+                heads_to_try.append(token.ID)
+        candidates = build_mentions_from_heads(mention.sentence, heads_to_try)
+
+        # assign the best candidate for each mention
+        assigned_candidates = []
+        for mention in mentions_per_sentence[sentence]:
+            best_mention = most_similar_mention(mention, candidates)
+
+            if best_mention is None:
+                # headless mention (only punctuation)
+                assigned_candidates.append(None)
+            elif best_mention in assigned_candidates:
+                # Two mentions claim the same head; conceptually something like
                 # 1 John      ....  ..     (0|(0)
                 # 2 Johnson   flat   1     0)
-                # for now, take the longer span, as it carries more information
-                replace_mention = False
-                for s in valid_mentions:
-                    if s['head'] == span['head']:
-                        if len(s['ids']) > len(ids):
-                            replace_mention = s
-                            break
+                idx = assigned_candidates.index(best_mention)
+                competing_mention = mentions[idx]
 
-                if replace_mention:
-                    valid_mentions.remove(replace_mention)
-                    valid_mentions.append(span)
+                if len(mention.ids) > len(competing_mention.ids):
+                    # take the longer span, as it carries more information
+                    assigned_candidates[idx] = None
+                    assigned_candidates.append(best_mention)
+                else:
+                    # for similar length, take the one first encountered
+                    # so drop this mention
+                    assigned_candidates.append(None)
             else:
-                mentions_heads.append(span['head'])
-                valid_mentions.append(span)
+                # the first span to claim this mention
+                assigned_candidates.append(best_mention)
 
-    return valid_mentions
+        converted_mentions = []
+        for mention, candidate in \
+                zip(mentions_per_sentence[sentence], assigned_candidates):
+            if candidate is not None:
+                candidate.refid = mention.refid
+                converted_mentions.append(candidate)
+
+        result += converted_mentions
+
+    return result
 
 
 def preprocess_sentence(sentence):
@@ -597,17 +689,23 @@ def preprocess_sentence(sentence):
 
     Modify the coordination and copula in the dependency tree
     Replace span based mentions with syntactic head based mentions
+
+    Returns:
+        list of Mention (bra-ket), list of Mention (head based)
     """
     sentence = transform_tree(sentence)
-    mentions = get_mentions_from_bra_ket(sentence)
+    bra_ket_mentions = get_mentions_from_bra_ket(sentence)
+    head_mentions = convert_mentions(bra_ket_mentions)
 
+    # clear bra-ket annotations
     for token in sentence:
         token.COREF = '_'
 
-    for mention in mentions:
-        sentence[mention['head']].COREF = mention['refid']
+    # add head based annotations
+    for mention in head_mentions:
+        sentence[mention.head].COREF = mention.refid
 
-    return sentence
+    return bra_ket_mentions, head_mentions
 
 
 def postprocess_sentence(sentence):
@@ -615,44 +713,38 @@ def postprocess_sentence(sentence):
     Postprocess a Sentence containing syntactic head based mentions.
 
     Replace the syntactic head based mentions by spans.
-    Do *NOT* undo changes made to the dependency graph.
+
+    NOTE: Does *NOT* undo changes made to the dependency graph.
     """
-    heads = []
-    head_to_entity = {}
+    # get head based mentions
+    mentions = get_mentions(sentence)
+
+    # clear head based annotation
     for token in sentence:
-        if token.COREF != '_':
-            heads.append(token.ID)
-            head_to_entity[token.ID] = token.COREF
-            token.COREF = '_'
+        token.COREF = '_'
 
-    mentions = build_mentions_from_heads(sentence, heads)
-    # mentions is a dict of {head]} -> mention
-    for head in mentions:
-        mention = mentions[head]
-        entity = head_to_entity[head]
-
+    # add bra-ket annotation
+    for mention in mentions:
         astart = sentence[mention.start].COREF
         aend = sentence[mention.end].COREF
 
         if mention.start == mention.end:
             # add a single token mention
             if astart == '_':
-                astart = '({})'.format(entity)
+                astart = '({})'.format(mention.refid)
             else:
-                astart = '{}|({})'.format(astart, entity)
+                astart = '{}|({})'.format(astart, mention.refid)
         else:
             # add a multi token mention
             if astart == '_':
-                astart = '({}'.format(entity)
+                astart = '({}'.format(mention.refid)
             else:
-                astart = '({}|{}'.format(entity, astart)
+                astart = '({}|{}'.format(mention.refid, astart)
 
             if aend == '_':
-                aend = '{})'.format(entity)
+                aend = '{})'.format(mention.refid)
             else:
-                aend = '{})|{}'.format(entity, aend)
+                aend = '{})|{}'.format(mention.refid, aend)
 
             sentence[mention.end].COREF = aend
         sentence[mention.start].COREF = astart
-
-    return sentence
