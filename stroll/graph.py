@@ -9,8 +9,17 @@ RID_DIMS = 4
 
 
 class GraphDataset(ConlluDataset):
-    def __init__(self, filename, features=['UPOS'], sentence_encoder=None):
+    def __init__(self,
+                 filename=None,
+                 features=['UPOS'],
+                 sentence_encoder=None,
+                 dataset=None
+                 ):
         super().__init__(filename)
+        if filename is None and dataset is not None:
+            # make a graph dataset from the conllu dataset
+            self.sentences = dataset.sentences
+
         self.sentence_encoder = sentence_encoder
         self.features = features
 
