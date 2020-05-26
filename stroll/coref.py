@@ -79,22 +79,26 @@ class Mention():
         sentence = self.sentence
         token = sentence[self.head]
         if token.FORM == '':
-            mtype = 'LIST'
+            return 'LIST'
         elif token.UPOS == 'PRON':
-            mtype = 'PRONOMIAL'
+            return 'PRONOMIAL'
         elif token.UPOS == 'PROPN':
-            mtype = 'PROPER'
-        else:
-            mtype = 'NOMINAL'
-        return mtype
+            return 'PROPER'
 
-    def nested(mention):
+        return 'NOMINAL'
+
+    def nested(self):
         """A mention is nested if any of its parents are a mention."""
-        sentence = mention.sentence
+        sentence = self.sentence
 
-        token = sentence[mention.head]
-        while token.HEAD != '0':
+        # dont hand on (bad) dependency graphs that are not a single tree
+        visited = ['0']
+
+        token = sentence[self.head]
+        visited.append(token.ID)
+        while token.HEAD not in visited:
             token = sentence[token.HEAD]
+            visited.append(token.ID)
             if token.COREF != '_':
                 return 1.0
 
@@ -123,9 +127,12 @@ def mentions_heads_agree(mentionA, mentionB):
 
     headA_contents.append(sentA[mentionA.head].FORM.lower())
     idx = sentA.index(mentionA.head) + 1
-    while sentA[idx].DEPREL == 'flat':
-        headA_contents.append(sentA[idx].FORM.lower())
-        idx += 1
+    while idx < len(sentA):
+        if sentA[idx].DEPREL == 'flat':
+            headA_contents.append(sentA[idx].FORM.lower())
+            idx = idx + 1
+        else:
+            break
 
     # build the multi word string for mention B
     headB_contents = []
@@ -133,9 +140,12 @@ def mentions_heads_agree(mentionA, mentionB):
 
     headB_contents.append(sentB[mentionB.head].FORM.lower())
     idx = sentB.index(mentionB.head) + 1
-    while sentB[idx].DEPREL == 'flat':
-        headB_contents.append(sentB[idx].FORM.lower())
-        idx += 1
+    while idx < len(sentB):
+        if sentB[idx].DEPREL == 'flat':
+            headB_contents.append(sentB[idx].FORM.lower())
+            idx = idx + 1
+        else:
+            break
 
     # All tokens from the shortest one should be in the largest
     if len(headA_contents) < len(headB_contents):
@@ -181,13 +191,25 @@ def mentions_match_relaxed(mentionA, mentionB):
         if token.UPOS in ['PROPN', 'NOUN']:
             contentA.append(token.FORM.lower())
 
+    contentB = []
     for id in mentionB.ids:
         token = sentB[id]
         if token.UPOS in ['PROPN', 'NOUN']:
-            if token.FORM.lower() in contentA:
-                return 1.0
+            contentB.append(token.FORM.lower())
 
-    return 0.0
+    if len(contentA) == 0 or len(contentB) == 0:
+        return 0.0
+
+    if len(contentA) <= len(contentB):
+        for FORM in contentA:
+            if FORM not in contentB:
+                return 0.0
+    else:
+        for FORM in contentB:
+            if FORM not in contentA:
+                return 0.0
+
+    return 1.0
 
 
 def mentions_overlap(mentionA, mentionB):
@@ -249,6 +271,19 @@ def build_mentions_from_heads(sentence, heads):
     # collect the spans
     mentions = []
     for head in heads:
+        if sentence[head].DEPREL == 'punct':
+            mentions.append(
+                Mention(
+                    head=head,
+                    sentence=sentence,
+                    refid=sentence[head].COREF,
+                    start=head,
+                    end=head,
+                    ids=[head]
+                    )
+            )
+            continue
+
         # get all tokens that make up the subtree, by construction
         ids, = np.where(is_descendant[:, sentence.index(head)] > 0)
 
@@ -289,8 +324,9 @@ def build_mentions_from_heads(sentence, heads):
         # When validating, empty tokens are not printed, and the span
         # would be malformed.
         # move the end of the span until it is not an empty token.
+        id_start = pruned_ids[0]
         id_end = pruned_ids[-1]
-        while sentence[id_end].FORM == '':
+        while sentence[id_end].FORM == '' and id_end > id_start:
             id_end -= 1
 
         if len(pruned_ids) > 0:
@@ -299,7 +335,7 @@ def build_mentions_from_heads(sentence, heads):
                     head=head,
                     sentence=sentence,
                     refid=sentence[head].COREF,
-                    start=sentence[pruned_ids[0]].ID,
+                    start=sentence[id_start].ID,
                     end=sentence[id_end].ID,
                     ids=[sentence[i].ID for i in pruned_ids]
                     )
