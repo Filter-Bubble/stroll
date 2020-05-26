@@ -1,9 +1,13 @@
 import re
+
 import numpy as np
+
+import torch
 
 import logging
 
 from stroll.conllu import Token
+from stroll.labels import to_one_hot, mention_type_codec
 
 # We always ignore punctuation, as they have the sentence root as head
 # For multiple heads per span, we take the 1st head (ie. with lowest token.ID)
@@ -228,6 +232,40 @@ def mentions_overlap(mentionA, mentionB):
         return 1.0
 
     return 0.0
+
+
+def features_mention(dataset, mention):
+    # 00_WordVectors => TODO
+    # 01_MentionType
+    # 02_MentionLength
+    # 03_MentionNormLocation
+    # 04_IsMentionNested
+    doc_length = dataset.doc_lengths[mention.sentence.doc_id]
+    norm_location = mention.sentence.rank / (doc_length - 1.0)
+
+    return torch.cat((
+        to_one_hot(mention_type_codec, mention.type()),
+        torch.tensor([
+            len(mention.ids),
+            norm_location,
+            mention.nested()
+            ])
+        ))
+
+
+def features_mention_pair(dataset, mentionA, mentionB):
+    # 03_HeadsAgree
+    # 04_ExactStringMatch
+    # 05_RelaxedStringMatch
+    # 06_SentenceDistance
+    # 08_Overlapping
+    return torch.tensor([
+        mentions_heads_agree(mentionA, mentionB),
+        mentions_match_exactly(mentionA, mentionB),
+        mentions_match_relaxed(mentionA, mentionB),
+        abs(mentionA.sentence.rank - mentionB.sentence.rank),
+        mentions_overlap(mentionA, mentionB)
+        ])
 
 
 def adjacency_matrix(sentence):
