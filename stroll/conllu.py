@@ -104,8 +104,25 @@ class Token():
 
 
 class Sentence():
-    """A class representing a sentence,
-    ie. the tokens with their annotations."""
+    """
+    A class representing a sentence.
+
+    It contains the tokens with their annotations.
+    Like a dataset, it is iterable and index-able:
+        for token in sentence
+        token = Sentence[1]  # indexed by number
+        token = Sentence['0']  # indexed by Token.ID
+
+    NOTE: You can use id = sentence.index['0'] to get the
+    number corresponding to the token's Token.ID
+
+    Properties:
+        sent_id    identifier of the sentence
+        full_text  full text of the sentence, possibly not tokenized.
+        doc_id     identifier of the document this sentence is from.
+        rank       The sentence's rank (0 is first, 1 second, etc)
+        tokens     the list of tokens that make up the sentence
+    """
     def __init__(self, sent_id=None, full_text=None, rank=None, doc_id=None):
         self.sent_id = sent_id  # sentence identifier, string
         self.full_text = full_text  # full (raw) text of sentence
@@ -172,6 +189,18 @@ class Sentence():
 
 
 class ConlluDataset(Dataset):
+    """
+    The conll-u dataset class.
+
+    The dataset is index-able, and iterable:
+        sent = Dataset[10]
+        for sent in Dataset
+
+    properties:
+        sentences    list of Sentence
+        doc_lengths  dict of number of sentences per doc,
+                     indexed by Sentenc.doc_id
+    """
     def __init__(self, filename=None):
         self.sentences = []
         self.doc_lengths = {}
