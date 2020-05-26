@@ -87,7 +87,7 @@ FRAMES = ['_', 'rel']
 FRAME_WEIGHTS = torch.Tensor([1., 10.])
 
 # COREF related
-MENTIONS = ['LIST', 'PRONOMIAL', 'PROPER', 'NOMINAL']
+MENTION_TYPES = ['LIST', 'PRONOMIAL', 'PROPER', 'NOMINAL']
 
 upos_codec = LabelEncoder().fit(UPOS)
 xpos_codec = LabelEncoder().fit(XPOS)
@@ -95,7 +95,7 @@ deprel_codec = LabelEncoder().fit(DEPREL)
 feats_codec = LabelEncoder().fit(FEATS)
 frame_codec = LabelEncoder().fit(FRAMES)
 role_codec = LabelEncoder().fit(ROLES)
-mention_codec = LabelEncoder().fit(MENTIONS)
+mention_type_codec = LabelEncoder().fit(MENTION_TYPES)
 
 
 def to_one_hot(codec, values):
