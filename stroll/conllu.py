@@ -129,6 +129,7 @@ class Sentence():
         self.rank = rank
         self.doc_id = doc_id
         self.tokens = []
+        self.dataset = None
         self._id_to_index = None  # maps Token.ID to int index in sentence
 
     def __len__(self):
@@ -264,6 +265,7 @@ class ConlluDataset(Dataset):
             else:
                 fields = line.split('\t')
                 sentence.add(Token(fields))
+        self.doc_lengths[doc_current_id] = doc_sent_count
 
     def __getitem__(self, index):
         return self.sentences[index]
