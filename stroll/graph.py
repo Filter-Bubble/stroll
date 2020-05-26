@@ -5,6 +5,9 @@ from .conllu import ConlluDataset
 
 from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec
 
+RELATION_TYPE_SELF = torch.tensor([0])
+RELATION_TYPE_HEAD = torch.tensor([1])
+RELATION_TYPE_CHILD = torch.tensor([2])
 
 
 class GraphDataset(ConlluDataset):
@@ -60,7 +63,11 @@ class GraphDataset(ConlluDataset):
                 'frame': token.FRAME,
                 'role': token.ROLE,
                 'coref': token.COREF,
-                'index': torch.Tensor([index]).long()
+                'index': torch.tensor([index], dtype=torch.int32),
+                'token_index': torch.tensor(
+                    [sentence.index(token.ID)],
+                    dtype=torch.int32
+                    )
                 })
 
         # add edges: word -> head
@@ -69,7 +76,7 @@ class GraphDataset(ConlluDataset):
                 g.add_edges(
                         sentence.index(token.ID),
                         sentence.index(token.HEAD),
-                        {'rel_type': torch.tensor([1])}
+                        {'rel_type': RELATION_TYPE_HEAD}
                         )
 
         # add 1/(3 * in_degree) as a weight factor
@@ -88,7 +95,7 @@ class GraphDataset(ConlluDataset):
             g.add_edges(
                     sentence.index(token.ID),
                     sentence.index(token.ID),
-                    {'rel_type': torch.tensor([0]), 'norm': norm}
+                    {'rel_type': RELATION_TYPE_SELF, 'norm': norm}
                     )
 
             # TODO: tokens with ID's like '38.1' don't have a head.
@@ -97,6 +104,6 @@ class GraphDataset(ConlluDataset):
                 g.add_edges(
                         sentence.index(token.HEAD),
                         sentence.index(token.ID),
-                        {'rel_type': torch.tensor([2]), 'norm': norm}
+                        {'rel_type': RELATION_TYPE_CHILD, 'norm': norm}
                         )
         return g
