@@ -5,7 +5,6 @@ from .conllu import ConlluDataset
 
 from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec
 
-RID_DIMS = 4
 
 
 class GraphDataset(ConlluDataset):
