@@ -321,7 +321,7 @@ parser.add_argument(
         nargs='*',
         dest='features',
         default=['UPOS', 'FEATS', 'DEPREL', 'WVEC'],
-        choices=['UPOS', 'XPOS', 'FEATS', 'DEPREL', 'WVEC', 'RID'],
+        choices=['UPOS', 'XPOS', 'FEATS', 'DEPREL', 'WVEC'],
         help='Features used by the model'
         )
 parser.add_argument(

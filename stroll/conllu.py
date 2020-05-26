@@ -70,10 +70,12 @@ class Token():
             return self.FEATS
         elif index == 'DEPREL':
             return self.DEPREL
+        elif index == 'FRAME':
+            return self.FRAME
+        elif index == 'ROLE':
+            return self.ROLE
         elif index == 'WVEC':
             return self.WVEC
-        elif index == 'RID':
-            return self.RID
         elif index == 'COREF':
             return self.COREF
         return None
