@@ -378,8 +378,8 @@ class CorefNet(nn.Module):
         # Relu(IN, 1000) -> Relu(1000, 500) -> Relu(500, 500) -> Affine(500, 1)
         self.task_b = MLP(
                 in_feats=self.in_feats_b,
-                out_feats=2,
-                h_layers=2
+                out_feats=1,
+                h_layers=3
                 )
 
         # Weight factors for combining the two losses

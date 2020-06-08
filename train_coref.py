@@ -4,25 +4,31 @@ import signal
 import argparse
 import logging
 
+import numpy as np
+import math
+
 import torch
 
 from torch.utils.data import DataLoader
+from torch.utils.data import RandomSampler
 from torch.utils.tensorboard import SummaryWriter
 
-from stroll.loss import FocalLoss
-
 from sklearn.metrics import precision_recall_fscore_support as PRF
+from sklearn.metrics import adjusted_mutual_info_score, adjusted_rand_score
+from scipy.cluster.hierarchy import linkage, fcluster
 
 import dgl
 
 from stroll.conllu import ConlluDataset
-from stroll.coref import preprocess_sentence, build_mentions_from_heads
+from stroll.coref import preprocess_sentence
+from stroll.coref import get_mentions
 from stroll.coref import features_mention, features_mention_pair
 from stroll.graph import GraphDataset
 from stroll.model import CorefNet
 from stroll.labels import FasttextEncoder
 
-MAX_MENTION_DISTANCE = 30
+MAX_MENTION_DISTANCE = 50
+MAX_MENTION_PER_DOC = 1000
 
 
 # Global arguments for dealing with Ctrl-C
@@ -30,6 +36,35 @@ global writer
 writer = None
 
 torch.manual_seed(43)
+
+
+class RandomBatchSampler:
+    """
+    Randomly sample batches; but keep elements within a batch consecutive.
+    """
+    def __init__(self, length, batch_size):
+        self.length = length
+        self.batch_size = batch_size
+
+        # find the number of batches
+        self.nbatches = math.ceil(length / batch_size)
+
+        # create a random sampler over these batches
+        self.random_sampler = RandomSampler(range(self.nbatches))
+
+    def __len__(self):
+        return self.nbatches
+
+    def __iter__(self):
+        self.it = self.random_sampler.__iter__()
+        return self
+
+    def __next__(self):
+        batch = next(self.it)
+
+        start = batch * self.batch_size
+        end = min(start + self.batch_size, self.length)
+        return range(start, end)
 
 
 def get_optimizer_and_scheduler_for_net(
@@ -74,55 +109,125 @@ def get_optimizer_and_scheduler_for_net(
     return optimizer, scheduler
 
 
-def build_pairs(raw, graph, idxs, wvec_out):
-    wvec = wvec_out[idxs]
-    entity = graph.ndata['coref'][idxs]
+def predict_clusters(similarities, nlinks=200, word_count=0):
+    # take the upper diagonal as needed for linkage
+    fulldist = similarities.numpy()
+    fulldist = fulldist[np.triu_indices(len(fulldist), 1)]
 
-    sent_index = graph.ndata['index']
-    token_index = graph.ndata['token_index']
+    # turn similarities into distances
+    fulldist = np.nan_to_num(np.exp(-1. * fulldist))
 
-    mentions = []
-    for idx in idxs:
-        sentence = raw[sent_index[idx].item()]
-        token = sentence[token_index[idx].item()]
-        mentions += build_mentions_from_heads(
-                sentence, [token.ID]
-                )
+    Z = linkage(fulldist, 'single')
 
-    # build pairs
-    target = []
+    return list(fcluster(Z, Z[nlinks, 2], criterion='distance'))
+
+
+def mentions_can_link(aid, mid, antecedent, mention):
+    """
+    Deterimine if mentions are allowed to link:
+    they should be from the same document, and withn MAX_MENTION_DISTANCE from
+    eachother.
+    """
+    if mid - aid >= MAX_MENTION_DISTANCE:
+        # TODO: fill with exponentially decaying similarity?
+        return False
+
+    if antecedent.sentence.doc_rank != mention.sentence.doc_rank:
+        # TODO: fill with very low similarities?
+        return False
+
+    return True
+
+
+def predict_similarities(net, mentions, gvec):
+    """
+        net       a CorefNet instance
+        mentions  a list of Mentions
+        gvec      the graph-convolutioned vectors for the mentions
+
+    returns:
+      similarities   torch.tensor(nmentions, nmetsions)
+      link           torch.tensor(nmentions, nmentions)
+    """
+
+    nmentions = len(mentions)
+    links = torch.zeros([nmentions, nmentions])
+    # BUG: oeps, very close to 0
+    similarities = torch.ones([nmentions, nmentions]) * -1e-8
+
+    # build a list of antecedents, and the pair vectors
     vectors = []
-    for mid, mention in enumerate(mentions):
-        for aid in range(max(0, mid - MAX_MENTION_DISTANCE), mid):
-            antecedent = mentions[aid]
-            # only match within a document
-            if antecedent.sentence.doc_id == mention.sentence.doc_id:
+    aids, mids = np.triu_indices(nmentions, 1)
+    for aid, mid in zip(aids, mids):
+        if not mentions_can_link(aid, mid,
+                                 mentions[aid], mentions[mid]):
+            continue
 
-                if entity[aid] == entity[mid]:
-                    # NOTE: this includes not entity with non-entity,
-                    # so coref == -1 for both.
-                    target.append(1.0)
-                else:
-                    target.append(0.0)
+        antecedent = mentions[aid]
+        mention = mentions[mid]
 
-                # build pair (aid, mid)
-                vectors.append(
-                    torch.cat((
-                        wvec[mid].view(-1),
-                        features_mention(raw, mention),
-                        wvec[aid].view(-1),
-                        features_mention(raw, antecedent),
-                        features_mention_pair(
-                            raw,
-                            antecedent,
-                            mention)
-                        ))
+        if antecedent.refid == mention.refid:
+            links[aid, mid] = 1
+            links[mid, aid] = 1
+
+        # build pair (aidx, midx)
+        vectors.append(
+            torch.cat((
+                gvec[mid].view(-1),
+                features_mention(mention),
+                gvec[aid].view(-1),
+                features_mention(antecedent),
+                features_mention_pair(
+                    antecedent,
+                    mention)
                 )
-    vectors = torch.stack(vectors)
-    return vectors, target
+            )
+        )
+
+    # get the similarity between those pairs
+    pairsim = net.task_b(torch.stack(vectors))
+
+    p = 0
+    for aid, mid in zip(aids, mids):
+        if not mentions_can_link(aid, mid,
+                                 mentions[aid], mentions[mid]):
+            continue
+
+        similarities[aid, mid] = pairsim[p]
+        similarities[mid, aid] = similarities[aid, mid]
+        p += 1
+
+    return links, similarities
 
 
-def train(net, train_raw, trainloader, test_raw, test_graph,
+def contrastive_loss(links, similarities, tau=torch.tensor(0.7)):
+    loss = torch.tensor(0.)
+
+    # build similarity matrix S[i, j] = exp(sim(i,j)/\tau)(1-\delta(i, j))
+    S = torch.exp(similarities / tau)
+
+    # build link matrix L[i, j] == 1 iff mentions are linked, 0 else
+    L = links
+
+    nmentions = len(links)
+    for i in range(nmentions):
+        same_label = torch.nonzero(L[i, :])
+        if len(same_label) < 2:
+            continue
+        contrast = torch.sum(S[i, :])
+
+        loss += -1.0 / (len(same_label) - 1) * \
+            torch.sum(
+                    torch.log(
+                        S[i, same_label] / contrast
+                    )
+            )
+
+    return loss / nmentions
+
+
+def train(net, train_raw, trainloader,
+          test_graph, test_mentions, test_clusters,
           optimizer, scheduler,
           epochs=60):
     global writer
@@ -134,18 +239,6 @@ def train(net, train_raw, trainloader, test_raw, test_graph,
     best_model_score = 0.
     word_count = args.word_count
 
-    id_loss_f = FocalLoss(
-            gamma=1.5,
-            alpha=None,  # unweighted
-            size_average=True
-            )
-
-    sim_loss_f = FocalLoss(
-            gamma=1.5,
-            alpha=None,  # unweighted
-            size_average=True
-            )
-
     print('Start training for {:d} epochs.'.format(epochs))
 
     # loop over the epochs
@@ -156,56 +249,49 @@ def train(net, train_raw, trainloader, test_raw, test_graph,
                 word_count
                 )
         # loop over each minibatch
-        for train_graph in trainloader:
+        for train_graph, mentions in trainloader:
             net.train()
 
             # predict mentions, and vectors
-            id_out, wvec_out = net(train_graph)
-
-            # correct mentions
-            # == -1 : token is not a mention -> 0
-            # >=  0 : token is a mention     -> 1
-            target = train_graph.ndata['coref'].view(-1).clamp(-1, 0) + 1
-
-            # score mentions
-            loss_id = id_loss_f(id_out.transpose(0, 1).view(2, -1), target)
+            id_out, gvec = net(train_graph)
 
             # predict coreference pairs:
 
-            # take the indices of the nodes that are mentions
-            _, mention_idxs = torch.max(id_out, dim=1)
-            mention_idxs = torch.nonzero(mention_idxs)
+            # correct mentions
+            target = train_graph.ndata['coref'].view(-1).clamp(0, 1)
+            target.detach()
 
-            if len(mention_idxs) != 0:
-                pairvecs, target = build_pairs(
-                        train_raw,
-                        train_graph,
-                        mention_idxs,
-                        wvec_out
+            # take the indices of the nodes that are gold-mentions
+            mention_idxs = torch.nonzero(target)
+
+            if len(mention_idxs) > 0:
+                links, similarities = predict_similarities(
+                        net,
+                        mentions,
+                        gvec[mention_idxs]
                         )
-                similarities = net.task_b(pairvecs)
 
-                # correct pairs
-                target = torch.tensor(target)
-
-                # score pairs
-                loss_sim = sim_loss_f(
-                        similarities.transpose(0, 1).view(2, -1),
-                        target
-                        )
+                loss_sim = contrastive_loss(links, similarities)
             else:
-                loss_sim = 1.0
+                loss_sim = torch.tensor(0)
 
             # apply loss
-            loss_total = MAX_MENTION_DISTANCE * loss_id + loss_sim
+            loss_total = loss_sim   # + loss_id
             optimizer.zero_grad()
-            loss_total.backward()
-            optimizer.step()
+
+            # for batches without a mention,  the loss is zero and
+            # loss.backward() raises a RuntimeError
+            try:
+                loss_total.backward()
+                optimizer.step()
+            except RuntimeError as e:
+                logging.error(
+                        'Loss={} ignoring runtime error in torch: {}'.format(
+                            loss_total.item(), e))
 
             # diagnostics
             word_count += len(train_graph)
             args.word_count = word_count
-            writer.add_scalar('loss_id', loss_id.item(), word_count)
             writer.add_scalar('loss_sim', loss_sim.item(), word_count)
             writer.add_scalar('loss_total', loss_total.item(), word_count)
 
@@ -213,52 +299,62 @@ def train(net, train_raw, trainloader, test_raw, test_graph,
                 dur = time.time() - t0
                 net.eval()
                 with torch.no_grad():
-                    id_out, wvec_out = net(test_graph)
+                    id_out, gvec = net(test_graph)
+
+                    # system mentions
                     _, system = torch.max(id_out, dim=1)
 
-                    correct = test_graph.ndata['coref'].view(-1)
-                    correct = correct.clamp(-1, 0) + 1
+                    # correct mentions:
+                    target = test_graph.ndata['coref'].view(-1).clamp(0, 1)
 
-                    score_id_p, score_id_r, score_id_f, _ = PRF(
-                        correct, system, labels=[1]
+                    # score
+                    score_id_p, score_id_r, score_id_f1, _ = PRF(
+                        target, system, labels=[1]
                         )
 
                     score_id_p = score_id_p[0]
                     score_id_r = score_id_r[0]
-                    score_id_f = score_id_f[0]
+                    score_id_f1 = score_id_f1[0]
 
-                    # predict coreference pairs
-                    _, mention_idxs = torch.max(id_out, dim=1)
-                    mention_idxs = torch.nonzero(mention_idxs)
-                    pairvecs, correct = build_pairs(
-                            test_raw,
-                            test_graph,
-                            mention_idxs,
-                            wvec_out
+                    # coreference pairs: score clustering on gold mentions
+
+                    # take the indices of the nodes that are gold-mentions
+                    mention_idxs = torch.nonzero(target)
+
+                    links, similarities = predict_similarities(
+                            net,
+                            test_mentions,
+                            gvec[mention_idxs]
                             )
-                    system = net.task_b(pairvecs)
-                    _, system = torch.max(system, dim=1)
 
-                    score_sim_p, score_sim_r, score_sim_f, _ = PRF(
-                        correct, system, labels=[1]
-                        )
+                    system_clusters = predict_clusters(
+                            similarities,
+                            nlinks=750,
+                            word_count=word_count
+                            )
 
-                    score_sim_p = score_sim_p[0]
-                    score_sim_r = score_sim_r[0]
-                    score_sim_f = score_sim_f[0]
+                    score_sim_ar = adjusted_rand_score(
+                            test_clusters, system_clusters
+                            )
+                    score_sim_ami = adjusted_mutual_info_score(
+                            test_clusters, system_clusters
+                            )
 
+                # Report
                 print('Elements {:08d} |'.format(word_count),
-                      'F1 {:.4f}|'.format(score_id_f),
-                      'F1 {:.4f}|'.format(score_sim_f),
-                      'words/sec {:4.3f}'.format(len(train_graph) / dur)
+                      'F1 {:.4f}|'.format(score_id_f1),
+                      'AR {:.4f}|'.format(score_sim_ar),
+                      'words/sec {:4.3f}'.format(count_per_eval / dur)
                       )
+
+                score = score_sim_ar
 
                 writer.add_scalar('s_id_p', score_id_p, word_count)
                 writer.add_scalar('s_id_r', score_id_r, word_count)
-                writer.add_scalar('s_id_f1', score_id_f, word_count)
-                writer.add_scalar('s_sim_p', score_sim_p, word_count)
-                writer.add_scalar('s_sim_r', score_sim_r, word_count)
-                writer.add_scalar('s_sim_f1', score_sim_f, word_count)
+                writer.add_scalar('s_id_f1', score_id_f1, word_count)
+                writer.add_scalar('s_sim_ar', score_sim_ar, word_count)
+                writer.add_scalar('s_sim_ami', score_sim_ami, word_count)
+                writer.add_scalar('s_f1xar', score, word_count)
 
                 for name, param in net.state_dict().items():
                     writer.add_scalar(
@@ -268,11 +364,11 @@ def train(net, train_raw, trainloader, test_raw, test_graph,
                             )
 
                 # Save best-until-now model
-                if epoch > 0 and score_id_f * score_sim_f > best_model_score:
+                if epoch > 0 and score > best_model_score:
                     logging.info('Saving new best model at step {:09d}'.format(
                         word_count
                         ))
-                    best_model_score = score_id_f * score_sim_f
+                    best_model_score = score
                     save_model(net)
 
                 # reset timer
@@ -318,14 +414,14 @@ parser.add_argument(
         '--batch_size',
         dest='batch_size',
         type=int,
-        default=50,
+        default=150,
         help='Evaluation batch size.'
         )
 parser.add_argument(
         '--learning_rate',
         dest='learning_rate',
         type=float,
-        default='1e-2',
+        default='1e-3',
         help='Initial learning rate.'
         )
 parser.add_argument(
@@ -370,16 +466,27 @@ parser.add_argument(
         )
 
 
+def coref_collate(batch):
+    """
+    Collate function to batch samples together.
+    """
+
+    mentions = []
+    for g in batch:
+        mentions += get_mentions(g.sentence)
+    return dgl.batch(batch), mentions
+
+
 def main(args):
     global writer
 
     logging.basicConfig(level=logging.INFO)
 
     exp_name = args.solver + \
-        'v3.3' + \
+        'v3.32' + \
         '_{:1.0e}'.format(args.learning_rate) + \
         '_{:d}b'.format(args.batch_size) + \
-        '_FL1.5' + \
+        '_HL' + \
         '_{:d}d'.format(args.h_dims) + \
         '_{:d}l'.format(args.h_layers) + \
         '_'.join(args.features)
@@ -408,9 +515,9 @@ def main(args):
             )
     trainloader = DataLoader(
         train_set,
-        batch_size=args.batch_size,
+        batch_sampler=RandomBatchSampler(len(train_set), args.batch_size),
         # num_workers=2,
-        collate_fn=dgl.batch
+        collate_fn=coref_collate
         )
 
     logging.info(
@@ -425,7 +532,27 @@ def main(args):
             sentence_encoder=sentence_encoder,
             features=args.features
             )
-    test_graph = dgl.batch([g for g in test_set])
+    testloader = DataLoader(
+        test_set,
+        num_workers=2,
+        batch_size=20,
+        collate_fn=coref_collate
+        )
+
+    test_graph = []
+    test_clusters = []
+
+    test_mentions = []
+    for g, m in testloader:
+        test_graph.append(g)
+        test_mentions += m
+
+    test_graph = dgl.batch(test_graph)
+    for mention in test_mentions:
+        sentence = mention.sentence
+        test_clusters.append(
+                int(mention.refid) + sentence.doc_rank * MAX_MENTION_PER_DOC
+                )
 
     logging.info('Building model.')
     net = CorefNet(
@@ -474,8 +601,9 @@ def main(args):
     train(net,
           train_raw,
           trainloader,
-          test_raw,
           test_graph,
+          test_mentions,
+          test_clusters,
           optimizer,
           scheduler,
           args.epochs

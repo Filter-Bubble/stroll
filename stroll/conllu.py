@@ -5,6 +5,7 @@ from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec, \
         frame_codec, role_codec
 from .labels import to_one_hot, to_index
 from .labels import ROLES, FRAMES
+from collections import OrderedDict
 
 
 class Token():
@@ -82,9 +83,9 @@ class Token():
 
     def encode(self):
         if self.COREF == '_':
-            coref = torch.tensor([-1], dtype=torch.int32)
+            coref = torch.tensor([0], dtype=torch.int32)
         else:
-            coref = torch.tensor([int(self.COREF)], dtype=torch.int32)
+            coref = torch.tensor([int(self.COREF) + 1], dtype=torch.int32)
 
         return Token([
             self.ID,  # not encoded
@@ -120,16 +121,21 @@ class Sentence():
         sent_id    identifier of the sentence
         full_text  full text of the sentence, possibly not tokenized.
         doc_id     identifier of the document this sentence is from.
-        rank       The sentence's rank (0 is first, 1 second, etc)
+        doc_rank   the document's rank (first, second, ..) in the dataset
+        sent_rank  the sentence's rank (first, second, ..) in the document
         tokens     the list of tokens that make up the sentence
     """
-    def __init__(self, sent_id=None, full_text=None, rank=None, doc_id=None):
+    def __init__(self,
+                 sent_id=None,
+                 full_text=None
+                 ):
         self.sent_id = sent_id  # sentence identifier, string
         self.full_text = full_text  # full (raw) text of sentence
-        self.rank = rank
-        self.doc_id = doc_id
-        self.tokens = []
+        self.sent_rank = None
+        self.doc_rank = None
+        self.doc_id = None
         self.dataset = None
+        self.tokens = []
         self._id_to_index = None  # maps Token.ID to int index in sentence
 
     def __len__(self):
@@ -174,9 +180,14 @@ class Sentence():
         self.sent_id = sent_id
 
     def encode(self, sentence_encoder=None):
-        encoded_sentence = Sentence()
-        encoded_sentence.set_sent_id(self.sent_id)
-        encoded_sentence.set_full_text(self.full_text)
+        encoded_sentence = Sentence(
+                sent_id=self.sent_id,
+                full_text=self.full_text
+                )
+        encoded_sentence.sent_rank = self.sent_rank
+        encoded_sentence.doc_rank = self.doc_rank
+        encoded_sentence.doc_id = self.doc_id
+        encoded_sentence.dataset = self.dataset
 
         for token in self.tokens:
             encoded_sentence.add(token.encode())
@@ -204,7 +215,7 @@ class ConlluDataset(Dataset):
     """
     def __init__(self, filename=None):
         self.sentences = []
-        self.doc_lengths = {}
+        self.doc_lengths = OrderedDict()
 
         if filename is not None:
             self._load(filename)
@@ -220,7 +231,6 @@ class ConlluDataset(Dataset):
         # <12 columns tab separated, 1 line per token in the sentence>
         # <empty line>
         sentence = Sentence()
-        doc_count = 0
         doc_current_id = filename
         doc_sent_count = 0
         for line in conllu_raw:
@@ -246,8 +256,7 @@ class ConlluDataset(Dataset):
                     doc_current_id = line[14:]
                 else:
                     doc_current_id = '{filename}-{:06d}'.format(
-                            filename, doc_count)
-                doc_count += 1
+                            filename, len(self.doc_lengths))
                 doc_sent_count = 0
             elif line[0:1] == '#':
                 # ignore comments
@@ -255,8 +264,11 @@ class ConlluDataset(Dataset):
             elif len(line) == 0:
                 # newline means end of a sentence
                 if len(sentence) > 0:
-                    sentence.rank = doc_sent_count
+                    sentence.sent_rank = doc_sent_count
+                    sentence.doc_rank = len(self.doc_lengths)
                     sentence.doc_id = doc_current_id
+                    sentence.dataset = self
+
                     self.sentences.append(sentence)
                     doc_sent_count += 1
 

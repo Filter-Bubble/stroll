@@ -1,6 +1,7 @@
 import torch
 import dgl
 
+from torch.utils.data import Dataset
 from .conllu import ConlluDataset
 
 from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec
@@ -10,17 +11,19 @@ RELATION_TYPE_HEAD = torch.tensor([1])
 RELATION_TYPE_CHILD = torch.tensor([2])
 
 
-class GraphDataset(ConlluDataset):
+class GraphDataset(Dataset):
     def __init__(self,
                  filename=None,
                  features=['UPOS'],
                  sentence_encoder=None,
                  dataset=None
                  ):
-        super().__init__(filename)
-        if filename is None and dataset is not None:
+
+        if filename:
+            self.dataset = ConlluDataset(filename)
+        elif dataset:
             # make a graph dataset from the conllu dataset
-            self.sentences = dataset.sentences
+            self.dataset = dataset
 
         self.sentence_encoder = sentence_encoder
         self.features = features
@@ -37,22 +40,25 @@ class GraphDataset(ConlluDataset):
         if 'WVEC' in features:
             self.in_feats = self.in_feats + self.sentence_encoder.dims
 
+    def __len__(self):
+        return len(self.dataset.sentences)
+
     def __iter__(self):
-        for i in range(len(self.sentences)):
-            yield self[i]
+        for i in range(len(self.dataset.sentences)):
+            yield self.dataset[i]
 
     def conllu(self, index):
         if isinstance(index, dgl.DGLGraph):
-            index = index.ndata['index'][0].item()
-        return super().__getitem__(index)
+            index = index.ndata['sent_index'][0].item()
+        return self.dataset[index]
 
     def __getitem__(self, index):
-        unencoded_sentence = super().__getitem__(index)
-        sentence = unencoded_sentence.encode(
+        g = dgl.DGLGraph()
+
+        g.sentence = self.dataset[index]
+        sentence = g.sentence.encode(
                 sentence_encoder=self.sentence_encoder
                 )
-
-        g = dgl.DGLGraph()
 
         # add nodes
         for token in sentence:
@@ -63,7 +69,7 @@ class GraphDataset(ConlluDataset):
                 'frame': token.FRAME,
                 'role': token.ROLE,
                 'coref': token.COREF,
-                'index': torch.tensor([index], dtype=torch.int32),
+                'sent_index': torch.tensor([index], dtype=torch.int32),
                 'token_index': torch.tensor(
                     [sentence.index(token.ID)],
                     dtype=torch.int32

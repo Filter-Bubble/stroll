@@ -78,6 +78,15 @@ class Mention():
         else:
             self.ids = []
 
+    def __repr__(self):
+        p = ""
+        p += '# sent_id:   {}\n'.format(self.sentence.sent_id)
+        p += '# full_text: {}\n'.format(self.sentence.full_text)
+        p += 'refid= {}\n'.format(self.refid)
+        p += 'head=  {}\n'.format(self.head)
+        p += 'span=  {}-{}\n'.format(self.start, self.end)
+        return p
+
     def type(self):
         """The type is one of LIST, PRONOMIAL, PROPER, NOMINAL"""
         sentence = self.sentence
@@ -95,7 +104,7 @@ class Mention():
         """A mention is nested if any of its parents are a mention."""
         sentence = self.sentence
 
-        # dont hand on (bad) dependency graphs that are not a single tree
+        # dont hang on (bad) dependency graphs that are not a single tree
         visited = ['0']
 
         token = sentence[self.head]
@@ -223,9 +232,9 @@ def mentions_overlap(mentionA, mentionB):
     sentA = mentionA.sentence
     sentB = mentionB.sentence
 
-    if sentA.doc_id != sentB.doc_id:
+    if sentA.doc_rank != sentB.doc_rank:
         return 0.0
-    if sentA.rank != sentB.rank:
+    if sentA.sent_rank != sentB.sent_rank:
         return 0.0
 
     if mentionA.head in mentionB.ids or mentionB.head in mentionA.ids:
@@ -234,14 +243,17 @@ def mentions_overlap(mentionA, mentionB):
     return 0.0
 
 
-def features_mention(dataset, mention):
-    # 00_WordVectors => TODO
+def features_mention(mention):
     # 01_MentionType
     # 02_MentionLength
     # 03_MentionNormLocation
     # 04_IsMentionNested
-    doc_length = dataset.doc_lengths[mention.sentence.doc_id]
-    norm_location = mention.sentence.rank / (doc_length - 1.0)
+
+    sentence = mention.sentence
+    dataset = sentence.dataset
+
+    doc_length = list(dataset.doc_lengths.values())[sentence.doc_rank]
+    norm_location = sentence.sent_rank / (doc_length - 1.0)
 
     return torch.cat((
         to_one_hot(mention_type_codec, mention.type()),
@@ -253,7 +265,7 @@ def features_mention(dataset, mention):
         ))
 
 
-def features_mention_pair(dataset, mentionA, mentionB):
+def features_mention_pair(mentionA, mentionB):
     # 03_HeadsAgree
     # 04_ExactStringMatch
     # 05_RelaxedStringMatch
@@ -263,7 +275,7 @@ def features_mention_pair(dataset, mentionA, mentionB):
         mentions_heads_agree(mentionA, mentionB),
         mentions_match_exactly(mentionA, mentionB),
         mentions_match_relaxed(mentionA, mentionB),
-        abs(mentionA.sentence.rank - mentionB.sentence.rank),
+        abs(mentionA.sentence.sent_rank - mentionB.sentence.sent_rank),
         mentions_overlap(mentionA, mentionB)
         ])
 
@@ -679,7 +691,7 @@ def most_similar_mention(target, candidates):
 
 def convert_mentions(mentions):
     """
-    Convert bra-ket mentions to a head based mentions.
+    Convert bra-ket mentions to head based mentions.
 
     For each mention, look at its ids and find a syntactic head that
     matches the span best. A head can only match a single mention, so
