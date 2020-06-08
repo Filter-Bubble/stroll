@@ -13,7 +13,6 @@ from torch.utils.data import DataLoader
 from torch.utils.data import RandomSampler
 from torch.utils.tensorboard import SummaryWriter
 
-from sklearn.metrics import precision_recall_fscore_support as PRF
 from sklearn.metrics import adjusted_mutual_info_score, adjusted_rand_score
 from scipy.cluster.hierarchy import linkage, fcluster
 
@@ -226,7 +225,7 @@ def contrastive_loss(links, similarities, tau=torch.tensor(0.7)):
     return loss / nmentions
 
 
-def train(net, train_raw, trainloader,
+def train(net, trainloader,
           test_graph, test_mentions, test_clusters,
           optimizer, scheduler,
           epochs=60):
@@ -301,24 +300,8 @@ def train(net, train_raw, trainloader,
                 with torch.no_grad():
                     id_out, gvec = net(test_graph)
 
-                    # system mentions
-                    _, system = torch.max(id_out, dim=1)
-
-                    # correct mentions:
-                    target = test_graph.ndata['coref'].view(-1).clamp(0, 1)
-
-                    # score
-                    score_id_p, score_id_r, score_id_f1, _ = PRF(
-                        target, system, labels=[1]
-                        )
-
-                    score_id_p = score_id_p[0]
-                    score_id_r = score_id_r[0]
-                    score_id_f1 = score_id_f1[0]
-
                     # coreference pairs: score clustering on gold mentions
-
-                    # take the indices of the nodes that are gold-mentions
+                    target = test_graph.ndata['coref'].view(-1).clamp(0, 1)
                     mention_idxs = torch.nonzero(target)
 
                     links, similarities = predict_similarities(
@@ -342,19 +325,12 @@ def train(net, train_raw, trainloader,
 
                 # Report
                 print('Elements {:08d} |'.format(word_count),
-                      'F1 {:.4f}|'.format(score_id_f1),
                       'AR {:.4f}|'.format(score_sim_ar),
                       'words/sec {:4.3f}'.format(count_per_eval / dur)
                       )
 
-                score = score_sim_ar
-
-                writer.add_scalar('s_id_p', score_id_p, word_count)
-                writer.add_scalar('s_id_r', score_id_r, word_count)
-                writer.add_scalar('s_id_f1', score_id_f1, word_count)
                 writer.add_scalar('s_sim_ar', score_sim_ar, word_count)
                 writer.add_scalar('s_sim_ami', score_sim_ami, word_count)
-                writer.add_scalar('s_f1xar', score, word_count)
 
                 for name, param in net.state_dict().items():
                     writer.add_scalar(
@@ -364,6 +340,7 @@ def train(net, train_raw, trainloader,
                             )
 
                 # Save best-until-now model
+                score = score_sim_ar
                 if epoch > 0 and score > best_model_score:
                     logging.info('Saving new best model at step {:09d}'.format(
                         word_count
@@ -599,7 +576,6 @@ def main(args):
 
     print(net)
     train(net,
-          train_raw,
           trainloader,
           test_graph,
           test_mentions,
