@@ -281,7 +281,7 @@ def train(net, trainloader, test_graph,
 def save_model(model):
     d = model.state_dict()
     d['hyperparams'] = args
-    name = './runs/{}/model_{:09d}.pt'.format(args.exp_name, args.word_count)
+    name = './runs_srl/{}/model_{:09d}.pt'.format(args.exp_name, args.word_count)
     torch.save(d, name)
 
 
@@ -473,7 +473,7 @@ if __name__ == '__main__':
         args.word_count = 0
 
     print('Tensorboard output in "{}".'.format(exp_name))
-    writer = SummaryWriter('runs/' + exp_name)
+    writer = SummaryWriter('runs_srl/' + exp_name)
 
     print('Ctrl-c will abort training and save the current model.')
 

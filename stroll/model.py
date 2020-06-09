@@ -340,6 +340,59 @@ class Net(nn.Module):
         return frame_labels, role_labels, frame_chance, role_chance
 
 
+class MentionNet(nn.Module):
+    def __init__(
+            self,
+            in_feats=16,
+            h_layers=2,
+            h_dims=16,
+            activation='relu'
+            ):
+        super(MentionNet, self).__init__()
+        self.h_layers = h_layers
+        self.h_dims = h_dims
+        self.in_feats = in_feats
+        self.activation = activation
+
+        # Embedding
+        self.embedding = Embedding(
+                in_feats=self.in_feats,
+                out_feats=self.h_dims
+                )
+
+        # Hidden layers, each of h_dims to h_dims
+        self.kernel = RGCNGRU(
+                in_feats=self.h_dims,
+                out_feats=self.h_dims,
+                num_layers=self.h_layers
+                )
+
+        # a MLP per task
+
+        # mention identification
+        self.task_a = MLP(
+                in_feats=self.h_dims,
+                out_feats=2,
+                h_layers=2
+                )
+
+        # Weight factors for combining the two losses
+        self.loss_a = torch.nn.Parameter(torch.tensor([0.]))
+        self.loss_b = torch.nn.Parameter(torch.tensor([0.]))
+
+    def forward(self, g):
+        # Linear transform of one-hot-encoding to internal representation
+        g.ndata['h'] = self.embedding(g.ndata['v'])
+
+        # Hidden layers, each of h_dims to h_dims
+        g = self.kernel(g)
+
+        # MLP output
+        x_a = self.task_a(g.ndata['h'])
+
+        return x_a
+
+
 class CorefNet(nn.Module):
     def __init__(
             self,
@@ -369,13 +422,6 @@ class CorefNet(nn.Module):
                 num_layers=self.h_layers
                 )
 
-        # a MLP per task
-        self.task_a = MLP(
-                in_feats=self.h_dims,
-                out_feats=2,
-                h_layers=2
-                )
-        # Relu(IN, 1000) -> Relu(1000, 500) -> Relu(500, 500) -> Affine(500, 1)
         self.task_b = MLP(
                 in_feats=self.in_feats_b,
                 out_feats=1,
@@ -393,14 +439,4 @@ class CorefNet(nn.Module):
         # Hidden layers, each of h_dims to h_dims
         g = self.kernel(g)
 
-        # MLP output
-        x_a = self.task_a(g.ndata['h'])
-
-        return x_a, g.ndata['h']
-
-    def label(self, gs):
-        logitsm, mentionvsi = self(gs)
-        logitsm = torch.softmax(logitsm, dim=1)
-        mention_chance, mention_labels = torch.max(logitsm, dim=1)
-
-        return mention_labels, mention_chance
+        return g.ndata['h']

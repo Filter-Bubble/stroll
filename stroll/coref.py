@@ -47,11 +47,11 @@ class Mention():
 
     Properties:
       sentence The corresponding Sentence
-      head     The token.ID of the mention head
-      refid    The entity this mention refers to
-      start    The ID of the first token of the mention
-      end      The ID of the last token of the mention
-      ids      The IDs of all tokens part of the mention
+      head      The token.ID of the mention head
+      refid     The entity this mention refers to
+      start     The ID of the first token of the mention
+      end       The ID of the last token of the mention
+      ids       The IDs of all tokens part of the mention
 
       NOTE: The span corresponding to this mention is derived from
       the head, but processing has been done to remove syntax words.
@@ -408,6 +408,28 @@ def get_mentions(sentence):
     return build_mentions_from_heads(sentence, heads)
 
 
+def mark_anaphoric_mentions(dataset):
+    """
+    Set the Token.AN for each mention in the dataset.
+    """
+    doc_rank = 0
+    entities = {}
+    for sentence in dataset:
+        if sentence.doc_rank != doc_rank:
+            doc_rank = sentence.doc_rank
+            entities = {}
+        for token in sentence:
+            if token.COREF == '_':
+                continue
+            if token.COREF in entities:
+                entities[token.COREF] += 1
+                token.AN = 1.0
+            else:
+                entities[token.COREF] = 1
+                token.AN = 0.0
+    return
+
+
 def transform_coordinations(sentence):
     """
     Transform UD coordination to be more like SD coordination.
@@ -646,7 +668,7 @@ def get_mentions_from_bra_ket(sentence):
 
 def most_similar_mention(target, candidates):
     """
-    Find the head-based mention most similart to the given span,
+    Find the head-based mention most similar to the given span,
     based on the simple matching coefficient.
 
         target:     the Mention to approximate

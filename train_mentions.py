@@ -4,7 +4,6 @@ import signal
 import argparse
 import logging
 
-import numpy as np
 import math
 
 import torch
@@ -13,18 +12,16 @@ from torch.utils.data import DataLoader
 from torch.utils.data import RandomSampler
 from torch.utils.tensorboard import SummaryWriter
 
-from sklearn.metrics import adjusted_mutual_info_score, adjusted_rand_score
-from scipy.cluster.hierarchy import linkage, fcluster
+from sklearn.metrics import precision_recall_fscore_support as PRF
 
 import dgl
 
 from stroll.conllu import ConlluDataset
 from stroll.coref import preprocess_sentence
-from stroll.coref import get_mentions
-from stroll.coref import features_mention, features_mention_pair
 from stroll.graph import GraphDataset
-from stroll.model import CorefNet
+from stroll.model import MentionNet
 from stroll.labels import FasttextEncoder
+from stroll.loss import FocalLoss
 
 MAX_MENTION_DISTANCE = 50
 MAX_MENTION_PER_DOC = 1000
@@ -108,126 +105,9 @@ def get_optimizer_and_scheduler_for_net(
     return optimizer, scheduler
 
 
-def predict_clusters(similarities, nlinks=200, word_count=0):
-    # take the upper diagonal as needed for linkage
-    fulldist = similarities.numpy()
-    fulldist = fulldist[np.triu_indices(len(fulldist), 1)]
-
-    # turn similarities into distances
-    fulldist = np.nan_to_num(np.exp(-1. * fulldist))
-
-    Z = linkage(fulldist, 'single')
-
-    return list(fcluster(Z, Z[nlinks, 2], criterion='distance'))
-
-
-def mentions_can_link(aid, mid, antecedent, mention):
-    """
-    Deterimine if mentions are allowed to link:
-    they should be from the same document, and withn MAX_MENTION_DISTANCE from
-    eachother.
-    """
-    if mid - aid >= MAX_MENTION_DISTANCE:
-        # TODO: fill with exponentially decaying similarity?
-        return False
-
-    if antecedent.sentence.doc_rank != mention.sentence.doc_rank:
-        # TODO: fill with very low similarities?
-        return False
-
-    return True
-
-
-def predict_similarities(net, mentions, gvec):
-    """
-        net       a CorefNet instance
-        mentions  a list of Mentions
-        gvec      the graph-convolutioned vectors for the mentions
-
-    returns:
-      similarities   torch.tensor(nmentions, nmetsions)
-      link           torch.tensor(nmentions, nmentions)
-    """
-
-    nmentions = len(mentions)
-    links = torch.zeros([nmentions, nmentions])
-    # BUG: oeps, very close to 0
-    similarities = torch.ones([nmentions, nmentions]) * -1e-8
-
-    # build a list of antecedents, and the pair vectors
-    vectors = []
-    aids, mids = np.triu_indices(nmentions, 1)
-    for aid, mid in zip(aids, mids):
-        if not mentions_can_link(aid, mid,
-                                 mentions[aid], mentions[mid]):
-            continue
-
-        antecedent = mentions[aid]
-        mention = mentions[mid]
-
-        if antecedent.refid == mention.refid:
-            links[aid, mid] = 1
-            links[mid, aid] = 1
-
-        # build pair (aidx, midx)
-        vectors.append(
-            torch.cat((
-                gvec[mid].view(-1),
-                features_mention(mention),
-                gvec[aid].view(-1),
-                features_mention(antecedent),
-                features_mention_pair(
-                    antecedent,
-                    mention)
-                )
-            )
-        )
-
-    # get the similarity between those pairs
-    pairsim = net.task_b(torch.stack(vectors))
-
-    p = 0
-    for aid, mid in zip(aids, mids):
-        if not mentions_can_link(aid, mid,
-                                 mentions[aid], mentions[mid]):
-            continue
-
-        similarities[aid, mid] = pairsim[p]
-        similarities[mid, aid] = similarities[aid, mid]
-        p += 1
-
-    return links, similarities
-
-
-def contrastive_loss(links, similarities, tau=torch.tensor(0.7)):
-    loss = torch.tensor(0.)
-
-    # build similarity matrix S[i, j] = exp(sim(i,j)/\tau)(1-\delta(i, j))
-    S = torch.exp(similarities / tau)
-
-    # build link matrix L[i, j] == 1 iff mentions are linked, 0 else
-    L = links
-
-    nmentions = len(links)
-    for i in range(nmentions):
-        same_label = torch.nonzero(L[i, :])
-        if len(same_label) < 2:
-            continue
-        contrast = torch.sum(S[i, :])
-
-        loss += -1.0 / (len(same_label) - 1) * \
-            torch.sum(
-                    torch.log(
-                        S[i, same_label] / contrast
-                    )
-            )
-
-    return loss / nmentions
-
-
 def train(net, trainloader,
-          test_graph, test_mentions, test_clusters,
-          optimizer, scheduler,
+          test_graph,
+          loss_function, optimizer, scheduler,
           epochs=60):
     global writer
 
@@ -248,89 +128,62 @@ def train(net, trainloader,
                 word_count
                 )
         # loop over each minibatch
-        for train_graph, mentions in trainloader:
+        for train_graph in trainloader:
             net.train()
 
-            # predict mentions, and vectors
-            id_out, gvec = net(train_graph)
+            xa = net(train_graph)
 
-            # predict coreference pairs:
-
-            # correct mentions
             target = train_graph.ndata['coref'].view(-1).clamp(0, 1)
-            target.detach()
+            xa = xa.transpose(0, 1).view(2, -1)
+            loss = loss_function(xa, target)
 
-            # take the indices of the nodes that are gold-mentions
-            mention_idxs = torch.nonzero(target)
-
-            if len(mention_idxs) > 0:
-                links, similarities = predict_similarities(
-                        net,
-                        mentions,
-                        gvec[mention_idxs]
-                        )
-
-                loss_sim = contrastive_loss(links, similarities)
-            else:
-                loss_sim = torch.tensor(0)
-
-            # apply loss
-            loss_total = loss_sim   # + loss_id
             optimizer.zero_grad()
 
             # for batches without a mention,  the loss is zero and
             # loss.backward() raises a RuntimeError
             try:
-                loss_total.backward()
+                loss.backward()
                 optimizer.step()
             except RuntimeError as e:
                 logging.error(
                         'Loss={} ignoring runtime error in torch: {}'.format(
-                            loss_total.item(), e))
+                            loss.item(), e))
 
             # diagnostics
             word_count += len(train_graph)
             args.word_count = word_count
-            writer.add_scalar('loss_sim', loss_sim.item(), word_count)
-            writer.add_scalar('loss_total', loss_total.item(), word_count)
+            writer.add_scalar('loss', loss.item(), word_count)
 
             if word_count > next_eval:
                 dur = time.time() - t0
                 net.eval()
                 with torch.no_grad():
-                    id_out, gvec = net(test_graph)
+                    xa = net(test_graph)
 
-                    # coreference pairs: score clustering on gold mentions
+                    # system mentions
+                    _, system = torch.max(xa, dim=1)
+
+                    # correct mentions:
                     target = test_graph.ndata['coref'].view(-1).clamp(0, 1)
-                    mention_idxs = torch.nonzero(target)
 
-                    links, similarities = predict_similarities(
-                            net,
-                            test_mentions,
-                            gvec[mention_idxs]
-                            )
+                    # score
+                    score_id_p, score_id_r, score_id_f1, _ = PRF(
+                        target, system, labels=[1]
+                        )
 
-                    system_clusters = predict_clusters(
-                            similarities,
-                            nlinks=750,
-                            word_count=word_count
-                            )
-
-                    score_sim_ar = adjusted_rand_score(
-                            test_clusters, system_clusters
-                            )
-                    score_sim_ami = adjusted_mutual_info_score(
-                            test_clusters, system_clusters
-                            )
+                    score_id_p = score_id_p[0]
+                    score_id_r = score_id_r[0]
+                    score_id_f1 = score_id_f1[0]
 
                 # Report
                 print('Elements {:08d} |'.format(word_count),
-                      'AR {:.4f}|'.format(score_sim_ar),
+                      'F1 {:.4f}|'.format(score_id_f1),
                       'words/sec {:4.3f}'.format(count_per_eval / dur)
                       )
 
-                writer.add_scalar('s_sim_ar', score_sim_ar, word_count)
-                writer.add_scalar('s_sim_ami', score_sim_ami, word_count)
+                writer.add_scalar('s_id_p', score_id_p, word_count)
+                writer.add_scalar('s_id_r', score_id_r, word_count)
+                writer.add_scalar('s_id_f1', score_id_f1, word_count)
 
                 for name, param in net.state_dict().items():
                     writer.add_scalar(
@@ -340,7 +193,7 @@ def train(net, trainloader,
                             )
 
                 # Save best-until-now model
-                score = score_sim_ar
+                score = score_id_f1
                 if epoch > 0 and score > best_model_score:
                     logging.info('Saving new best model at step {:09d}'.format(
                         word_count
@@ -366,7 +219,9 @@ def train(net, trainloader,
 def save_model(model):
     d = model.state_dict()
     d['hyperparams'] = args
-    name = './runs_coref/{}/model_{:09d}.pt'.format(args.exp_name, args.word_count)
+    name = './runs_mentions/{}/model_{:09d}.pt'.format(
+            args.exp_name, args.word_count
+            )
     torch.save(d, name)
 
 
@@ -443,17 +298,6 @@ parser.add_argument(
         )
 
 
-def coref_collate(batch):
-    """
-    Collate function to batch samples together.
-    """
-
-    mentions = []
-    for g in batch:
-        mentions += get_mentions(g.sentence)
-    return dgl.batch(batch), mentions
-
-
 def main(args):
     global writer
 
@@ -493,8 +337,8 @@ def main(args):
     trainloader = DataLoader(
         train_set,
         batch_sampler=RandomBatchSampler(len(train_set), args.batch_size),
-        # num_workers=2,
-        collate_fn=coref_collate
+        num_workers=2,
+        collate_fn=dgl.batch
         )
 
     logging.info(
@@ -513,28 +357,14 @@ def main(args):
         test_set,
         num_workers=2,
         batch_size=20,
-        collate_fn=coref_collate
+        collate_fn=dgl.batch
         )
 
-    test_graph = []
-    test_clusters = []
-
-    test_mentions = []
-    for g, m in testloader:
-        test_graph.append(g)
-        test_mentions += m
-
-    test_graph = dgl.batch(test_graph)
-    for mention in test_mentions:
-        sentence = mention.sentence
-        test_clusters.append(
-                int(mention.refid) + sentence.doc_rank * MAX_MENTION_PER_DOC
-                )
+    test_graph = dgl.batch([g for g in testloader])
 
     logging.info('Building model.')
-    net = CorefNet(
+    net = MentionNet(
         in_feats=train_set.in_feats,
-        in_feats_b=(args.h_dims + 7) * 2 + 5,
         h_layers=args.h_layers,
         h_dims=args.h_dims,
         activation='relu'
@@ -559,7 +389,7 @@ def main(args):
         args.word_count = 0
 
     print('Tensorboard output in "{}".'.format(exp_name))
-    writer = SummaryWriter('runs_coref/' + exp_name)
+    writer = SummaryWriter('runs_mentions/' + exp_name)
 
     print('Ctrl-c will abort training and save the current model.')
 
@@ -574,12 +404,17 @@ def main(args):
     signal.signal(signal.SIGTERM, sigterm_handler)
     signal.signal(signal.SIGINT, sigterm_handler)
 
+    loss_function = FocalLoss(
+            gamma=1.5,
+            alpha=None,  # FRAME_WEIGHTS,
+            size_average=True
+            )
+
     print(net)
     train(net,
           trainloader,
           test_graph,
-          test_mentions,
-          test_clusters,
+          loss_function,
           optimizer,
           scheduler,
           args.epochs
