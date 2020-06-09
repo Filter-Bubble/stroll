@@ -7,7 +7,6 @@ import torch
 from torch.utils.data import DataLoader
 from scorch.scores import muc, b_cubed, ceaf_m, ceaf_e, blanc
 
-from sklearn.metrics import precision_recall_fscore_support as PRF
 from sklearn.metrics import adjusted_rand_score, adjusted_mutual_info_score
 from scipy.cluster.hierarchy import linkage, fcluster
 from sklearn.metrics.cluster import contingency_matrix
@@ -88,7 +87,7 @@ def predict_similarities(net, mentions, gvec):
 
     nmentions = len(mentions)
     links = torch.zeros([nmentions, nmentions])
-    similarities = torch.ones([nmentions, nmentions]) * -1e-8
+    similarities = torch.ones([nmentions, nmentions]) * -1e8
 
     # build a list of antecedents, and the pair vectors
     vectors = []
@@ -149,30 +148,12 @@ def variation_of_information(clustA, clustB):
 def evaluate(net, eval_graph, eval_mentions, eval_clusters):
     net.eval()
     with torch.no_grad():
-        id_out, gvec = net(eval_graph)
-
-        # system mentions
-        _, system = torch.max(id_out, dim=1)
-
-        # correct mentions:
-        target = eval_graph.ndata['coref'].view(-1).clamp(0, 1)
-
-        # score
-        score_id_p, score_id_r, score_id_f1, _ = PRF(
-            target, system, labels=[1]
-            )
-        print('Number of mentions: {}'.format(target.sum().item()))
-
-        score_id_p = score_id_p[0]
-        score_id_r = score_id_r[0]
-        score_id_f1 = score_id_f1[0]
-        print('Identifying mentions: P R F1={} {} {}'.format(
-            score_id_p, score_id_r, score_id_f1
-            ))
+        gvec = net(eval_graph)
 
         # coreference pairs: score clustering on gold mentions
 
-        # take the indices of the nodes that are gold-mentions
+        # correct mentions:
+        target = eval_graph.ndata['coref'].view(-1).clamp(0, 1)
         mention_idxs = torch.nonzero(target)
 
         links, similarities = predict_similarities(
@@ -244,6 +225,86 @@ def evaluate(net, eval_graph, eval_mentions, eval_clusters):
                 ))
 
 
+def nearest_linking(similarity):
+    entities = []
+
+    nmentions = len(similarity)
+    for i in range(1, nmentions):
+        # take the similarity to all possible antecendents
+        antecedent_sims = similarity[0:i, i]
+
+        # find the most similar
+        antecedent = np.argmax(antecedent_sims)
+
+        # link if allowed
+        if similarity[antecedent, i] > 0:
+            # find the set that contains antecedent
+            for entity in entities:
+                if antecedent in entity:
+                    entity.add(i)
+                    break
+        else:
+            # start a new entity
+            entities.append(set([i]))
+
+    clusters = np.zeros(nmentions)
+    for e, entity in enumerate(entities):
+        for i in entity:
+            clusters[i] = e
+
+    return clusters
+
+
+def parse_z(Z, similarity, mentions):
+    from itertools import product
+    res = ""
+
+    nmentions = len(Z) + 1
+
+    clusters = {}
+
+    # starting point: each element its own cluster
+    for i in range(nmentions):
+        clusters[i] = set([i])
+
+    # Z[i, 0] and Z[i, 1] are combined to form cluster n+i.
+    # The distance between clusters Z[i, 0] and Z[i, 1] is given by Z[i, 2]
+    # Z[i, 3] represents the number of original observations in the new cluster
+    for i in range(len(Z)):
+        clustA = int(Z[i, 0])
+        clustB = int(Z[i, 1])
+        clusters[len(clusters)] = set(
+                list(clusters[clustA]) + list(clusters[clustB])
+                )
+
+        mindist = 1000
+        for a, b in product(clusters[clustA], clusters[clustB]):
+            if similarity[a, b] <= mindist:
+                pair = (a, b)
+
+        res += 'Merging {} ({} + {}) due to pair {}\n'.format(
+                i, list(clusters[clustA]), list(clusters[clustB]), pair
+                )
+        m0 = mentions[pair[0]]
+        m1 = mentions[pair[1]]
+        res += m0.__repr__() + '\n'
+        res += '{}'.format([m0.sentence[i].FORM for i in m0.ids])
+        res += '\n'
+        res += m1.__repr__() + '\n'
+        res += '{}'.format([m1.sentence[i].FORM for i in m1.ids])
+        res += '\n'
+        res += '\n'
+        for m in list(clusters[clustA]):
+            m0 = clusters[m]
+            res += '{} {} {}'.format(m, m0.refid, [m0.sentence[i].FORM for i in m0.ids])
+        res += '---'
+        for m in list(clusters[clustB]):
+            m0 = clusters[m]
+            res += '{} {} {}'.format(m, m0.refid, [m0.sentence[i].FORM for i in m0.ids])
+
+    return res
+
+
 if __name__ == '__main__':
     args = parser.parse_args()
 
@@ -300,6 +361,6 @@ if __name__ == '__main__':
         )
     logging.info(net.__repr__())
 
-    net.load_state_dict(state_dict)
+    net.load_state_dict(state_dict, strict=False)
 
     evaluate(net, eval_graph, eval_mentions, eval_clusters)
