@@ -1,15 +1,11 @@
-import sys
 import time
 import signal
 import argparse
 import logging
 
-import math
-
 import torch
 
 from torch.utils.data import DataLoader
-from torch.utils.data import RandomSampler
 from torch.utils.tensorboard import SummaryWriter
 
 from sklearn.metrics import precision_recall_fscore_support as PRF
@@ -22,6 +18,8 @@ from stroll.graph import GraphDataset
 from stroll.model import MentionNet
 from stroll.labels import FasttextEncoder
 from stroll.loss import FocalLoss
+from stroll.train import get_optimizer_and_scheduler_for_net
+from stroll.train import RandomBatchSampler
 
 MAX_MENTION_DISTANCE = 50
 MAX_MENTION_PER_DOC = 1000
@@ -32,77 +30,6 @@ global writer
 writer = None
 
 torch.manual_seed(43)
-
-
-class RandomBatchSampler:
-    """
-    Randomly sample batches; but keep elements within a batch consecutive.
-    """
-    def __init__(self, length, batch_size):
-        self.length = length
-        self.batch_size = batch_size
-
-        # find the number of batches
-        self.nbatches = math.ceil(length / batch_size)
-
-        # create a random sampler over these batches
-        self.random_sampler = RandomSampler(range(self.nbatches))
-
-    def __len__(self):
-        return self.nbatches
-
-    def __iter__(self):
-        self.it = self.random_sampler.__iter__()
-        return self
-
-    def __next__(self):
-        batch = next(self.it)
-
-        start = batch * self.batch_size
-        end = min(start + self.batch_size, self.length)
-        return range(start, end)
-
-
-def get_optimizer_and_scheduler_for_net(
-        net,
-        solver='CE',
-        learning_rate=1e-2,
-        ):
-    if solver == 'SGD':
-        optimizer = torch.optim.SGD(
-            net.parameters(),
-            lr=learning_rate,
-            momentum=0.9
-            )
-        scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer,
-            step_size=3,
-            gamma=0.9
-            )
-    elif solver == 'ADAM':
-        optimizer = torch.optim.Adam(
-            net.parameters(),
-            lr=learning_rate,
-            )
-        scheduler = torch.optim.lr_scheduler.LambdaLR(
-            optimizer,
-            lr_lambda=[lambda epoch: 0.9**min(max(0, (epoch - 4) // 2), 36)],
-            )
-    elif solver == 'ADAMW':
-        optimizer = torch.optim.AdamW(
-            net.parameters(),
-            lr=learning_rate
-            )
-        scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer,
-            step_size=100,
-            gamma=1.0
-            )
-    else:
-        print('Solver not implemented.')
-        sys.exit(-1)
-
-    return optimizer, scheduler
 
 
 def train(net, trainloader,

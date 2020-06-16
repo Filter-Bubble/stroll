@@ -8,6 +8,13 @@ from .labels import ROLES, FRAMES
 from collections import OrderedDict
 
 
+COPULA_NOUN_DESC_MOVE_TO_VERB = [
+        'advcl', 'advmod', 'aux', 'aux:pass', 'case', 'cc', 'csubj', 'expl',
+        'expl:pv', 'iobj', 'mark', 'nsubj', 'obl', 'obl:agent', 'orphan',
+        'parataxis', 'punct'
+        ]
+
+
 class Token():
     """A class representing a single token, ie. a word, with its annotation."""
     def __init__(self, fields, isEncoded=False):
@@ -47,6 +54,12 @@ class Token():
             self.COREF = fields[12]
         else:
             self.COREF = '_'
+
+        # For coreference resolution
+        if len(fields) >= 14:
+            self.anaphore = float(fields[13])
+        else:
+            self.anaphore = -100
 
         # We also allow labelling using sentence encoders (BERT/ FastText)
         self.WVEC = None
@@ -100,7 +113,8 @@ class Token():
             self.MISC,  # not encoded
             to_index(frame_codec, self.FRAME),
             to_index(role_codec, self.ROLE),
-            coref
+            coref,
+            self.anaphore
             ], isEncoded=True)
 
 
@@ -220,6 +234,27 @@ class ConlluDataset(Dataset):
         if filename is not None:
             self._load(filename)
 
+    def __repr__(self):
+        res = ''
+        current_doc_id = ''
+        first = True
+        for sentence in self:
+            if not first:
+                res += '\n'
+
+            # keep track of the current document
+            if sentence.doc_id != current_doc_id:
+                current_doc_id = sentence.doc_id
+                if not first:
+                    res += '\n'
+                res += '# newdoc id = {}\n'.format(sentence.doc_id)
+            res += sentence.__repr__()
+            res += '\n'
+
+            if first:
+                first = False
+        return res
+
     def _load(self, filename):
         logging.info("Opening {}".format(filename))
 
@@ -304,3 +339,170 @@ class ConlluDataset(Dataset):
                 frame_counts[token.FRAME] = frame_counts[token.FRAME] + 1
 
         return role_counts, frame_counts
+
+
+def transform_coordinations(sentence):
+    """
+    Transform UD coordination to be more like SD coordination.
+
+    Universal Dependency style coordination is not suitable for our head-based
+    approach; in the text '.. A and B ..' the possible heads are:
+
+    A which will correspond to the text 'A and B'
+    B which will correspond to 'and B'.
+
+    Add an extra node, and transform the dependency graph, to allow selecting:
+    'A', 'and B', 'A and B'
+    """
+
+    # find all coordinations, ie. tokens with DEPREL = 'conj'
+    coordinations = {}
+    for token in sentence:
+        if token.DEPREL == 'conj':
+            # identify the coordinations by the head
+            coordination_id = token.HEAD
+            if coordination_id in coordinations:
+                coordinations[coordination_id].append(token.ID)
+            else:
+                coordinations[coordination_id] = [token.ID]
+
+    # transform each coordination
+    #           ^                           ^
+    #           | deprel                    | deprel
+    #         tokenA              =>       tokenX
+    #       /conj    \ conj          /conj  |conj  \conj
+    #   tokenB        tokenC      tokenA   tokenB   tokenC
+    for tokenA_id in coordinations:
+        coordination = coordinations[tokenA_id]
+        tokenA = sentence[tokenA_id]
+
+        # attach tokens directly to the original HEAD of the first token
+        for token_id in coordination:
+            sentence[token_id].HEAD = tokenA.HEAD
+
+        # create a dummy node to represent the full coordination
+        tokenX = Token([
+            '{}'.format(len(sentence) + 1),  # ID
+            '',  # FORM
+            '',  # LEMMA
+            '_',  # UPOS
+            '_',  # XPOS
+            '_',  # FEATS
+            tokenA.HEAD,
+            tokenA.DEPREL,
+            tokenA.DEPS,
+            tokenA.MISC,
+            tokenA.FRAME,
+            tokenA.ROLE,
+            '_'  # COREF
+            ])
+
+        # attach all tokens to the dummy
+        for token_id in coordination:
+            sentence[token_id].HEAD = tokenX.ID
+
+        tokenA.HEAD = tokenX.ID
+        tokenA.DEPREL = 'conj'
+        tokenA.FRAME = '_'
+        tokenA.ROLE = '_'
+
+        sentence.add(tokenX)
+
+        # fix remaining issues:
+        # - punctuation is a child of the root token
+        if tokenX.DEPREL == 'root':
+            for token in sentence:
+                if token.DEPREL == 'punct':
+                    token.HEAD = tokenX.ID
+
+    return sentence
+
+
+def swap_copula(sentence, noun, verb):
+    """
+    We promote the copula token to be the head (like other verbs would be),
+    and attach the mention to it.  We then try to clean up the graph by moving
+    a number of descendants of the old head (ie part the mention) to the
+    copula. The choice is based on the DEPREL, for a list see
+    COPULA_NOUN_DESC_MOVE_TO_VERB.
+    """
+    # 1. swap the deprel of the 'cop' and its syntactic head
+    # (lets call it its noun)
+    verb.DEPREL = noun.DEPREL
+    noun.DEPREL = 'cop'
+    verb.HEAD = noun.HEAD
+    noun.HEAD = verb.ID
+
+    # 2. of the dependents of the noun, move some to the verb
+    for token in sentence:
+        if token.HEAD == noun.ID:
+            if token.DEPREL in COPULA_NOUN_DESC_MOVE_TO_VERB:
+                token.HEAD = verb.ID
+
+    return sentence
+
+
+def transform_copulas(sentence):
+    """
+    Transform the UD copola usage.
+
+    We focus on Dutch, which has explicit copolas: 'Dat is fantastisch.'
+    UD requires 'Dat' to be the head, which leads to mentions spanning the
+    whole sentence, which in turn will confuse all our mention and pairwise
+    mention features (nesting, matching).
+
+    For cases with multiple linked copulas 'Dat is en blijft fantastisch',
+    we set the DEPREL to 'conj', like UD does for normal verbs.
+    """
+    # 1. gather all 'cop' that point to another 'cop'
+    copulas = []
+    chained_copulas = []
+    for token in sentence:
+        if token.DEPREL != 'cop':
+            continue
+        if token.HEAD == '0':
+            # Inconceivable! DEPREL == 'cop', but HEAD == '0'
+            return sentence
+
+        if sentence[token.HEAD].DEPREL == 'cop':
+            # we have a -cop-> b -cop-> ..
+            # turn this into a conjunction
+            chained_copulas.append(token)
+        else:
+            copulas.append(token)
+
+    # if we didnt find any copulas we're done
+    if len(copulas) == 0:
+        return sentence
+
+    # 2. change the releation to conj
+    for token in chained_copulas:
+        token.DEPREL = 'conj'
+
+    # 3. swap the noun and verb
+    for verb in copulas:
+        noun = sentence[verb.HEAD]
+        swap_copula(sentence, noun, verb)
+
+    # 4. Clean-up:, all 'punct' must point to the head
+    for token in sentence:
+        if token.HEAD == '0':
+            # found the head
+            head_id = token.ID
+            break
+
+    for token in sentence:
+        if token.DEPREL == 'punct':
+            token.HEAD = head_id
+
+    return sentence
+
+
+def transform_tree(sentence):
+    """
+    Make dependency graph better suited for our task.
+    This calls: transform_copulas and transform_coordinations.
+    """
+    sentence = transform_copulas(sentence)
+    sentence = transform_coordinations(sentence)
+    return sentence

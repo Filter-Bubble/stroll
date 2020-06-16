@@ -1,32 +1,34 @@
-import sys
 import time
 import signal
 import argparse
 import logging
 
-import numpy as np
-import math
-
 import torch
 
 from torch.utils.data import DataLoader
-from torch.utils.data import RandomSampler
 from torch.utils.tensorboard import SummaryWriter
 
-from sklearn.metrics import adjusted_mutual_info_score, adjusted_rand_score
-from scipy.cluster.hierarchy import linkage, fcluster
+from sklearn.metrics import precision_recall_fscore_support as PRF
 
 import dgl
 
+from scorch.scores import muc
+
 from stroll.conllu import ConlluDataset
 from stroll.coref import preprocess_sentence
-from stroll.coref import get_mentions
-from stroll.coref import features_mention, features_mention_pair
+from stroll.coref import mark_gold_anaphores
+from stroll.coref import nearest_linking
+from stroll.coref import predict_anaphores, predict_similarities
+from stroll.coref import coref_collate
 from stroll.graph import GraphDataset
 from stroll.model import CorefNet
+from stroll.loss import contrastive_loss
 from stroll.labels import FasttextEncoder
+from stroll.evaluate import clusters_to_sets
+from stroll.train import get_optimizer_and_scheduler_for_net
+from stroll.train import RandomBatchSampler
 
-MAX_MENTION_DISTANCE = 50
+MAX_MENTION_DISTANCE = 20
 MAX_MENTION_PER_DOC = 1000
 
 
@@ -37,194 +39,6 @@ writer = None
 torch.manual_seed(43)
 
 
-class RandomBatchSampler:
-    """
-    Randomly sample batches; but keep elements within a batch consecutive.
-    """
-    def __init__(self, length, batch_size):
-        self.length = length
-        self.batch_size = batch_size
-
-        # find the number of batches
-        self.nbatches = math.ceil(length / batch_size)
-
-        # create a random sampler over these batches
-        self.random_sampler = RandomSampler(range(self.nbatches))
-
-    def __len__(self):
-        return self.nbatches
-
-    def __iter__(self):
-        self.it = self.random_sampler.__iter__()
-        return self
-
-    def __next__(self):
-        batch = next(self.it)
-
-        start = batch * self.batch_size
-        end = min(start + self.batch_size, self.length)
-        return range(start, end)
-
-
-def get_optimizer_and_scheduler_for_net(
-        net,
-        solver='CE',
-        learning_rate=1e-2,
-        ):
-    if solver == 'SGD':
-        optimizer = torch.optim.SGD(
-            net.parameters(),
-            lr=learning_rate,
-            momentum=0.9
-            )
-        scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer,
-            step_size=3,
-            gamma=0.9
-            )
-    elif solver == 'ADAM':
-        optimizer = torch.optim.Adam(
-            net.parameters(),
-            lr=learning_rate,
-            )
-        scheduler = torch.optim.lr_scheduler.LambdaLR(
-            optimizer,
-            lr_lambda=[lambda epoch: 0.9**min(max(0, (epoch - 4) // 2), 36)],
-            )
-    elif solver == 'ADAMW':
-        optimizer = torch.optim.AdamW(
-            net.parameters(),
-            lr=learning_rate
-            )
-        scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer,
-            step_size=100,
-            gamma=1.0
-            )
-    else:
-        print('Solver not implemented.')
-        sys.exit(-1)
-
-    return optimizer, scheduler
-
-
-def predict_clusters(similarities, nlinks=200, word_count=0):
-    # take the upper diagonal as needed for linkage
-    fulldist = similarities.numpy()
-    fulldist = fulldist[np.triu_indices(len(fulldist), 1)]
-
-    # turn similarities into distances
-    fulldist = np.nan_to_num(np.exp(-1. * fulldist))
-
-    Z = linkage(fulldist, 'single')
-
-    return list(fcluster(Z, Z[nlinks, 2], criterion='distance'))
-
-
-def mentions_can_link(aid, mid, antecedent, mention):
-    """
-    Deterimine if mentions are allowed to link:
-    they should be from the same document, and withn MAX_MENTION_DISTANCE from
-    eachother.
-    """
-    if mid - aid >= MAX_MENTION_DISTANCE:
-        # TODO: fill with exponentially decaying similarity?
-        return False
-
-    if antecedent.sentence.doc_rank != mention.sentence.doc_rank:
-        # TODO: fill with very low similarities?
-        return False
-
-    return True
-
-
-def predict_similarities(net, mentions, gvec):
-    """
-        net       a CorefNet instance
-        mentions  a list of Mentions
-        gvec      the graph-convolutioned vectors for the mentions
-
-    returns:
-      similarities   torch.tensor(nmentions, nmetsions)
-      link           torch.tensor(nmentions, nmentions)
-    """
-
-    nmentions = len(mentions)
-    links = torch.zeros([nmentions, nmentions])
-    # BUG: oeps, very close to 0
-    similarities = torch.ones([nmentions, nmentions]) * -1e-8
-
-    # build a list of antecedents, and the pair vectors
-    vectors = []
-    aids, mids = np.triu_indices(nmentions, 1)
-    for aid, mid in zip(aids, mids):
-        if not mentions_can_link(aid, mid,
-                                 mentions[aid], mentions[mid]):
-            continue
-
-        antecedent = mentions[aid]
-        mention = mentions[mid]
-
-        if antecedent.refid == mention.refid:
-            links[aid, mid] = 1
-            links[mid, aid] = 1
-
-        # build pair (aidx, midx)
-        vectors.append(
-            torch.cat((
-                gvec[mid].view(-1),
-                features_mention(mention),
-                gvec[aid].view(-1),
-                features_mention(antecedent),
-                features_mention_pair(
-                    antecedent,
-                    mention)
-                )
-            )
-        )
-
-    # get the similarity between those pairs
-    pairsim = net.task_b(torch.stack(vectors))
-
-    p = 0
-    for aid, mid in zip(aids, mids):
-        if not mentions_can_link(aid, mid,
-                                 mentions[aid], mentions[mid]):
-            continue
-
-        similarities[aid, mid] = pairsim[p]
-        similarities[mid, aid] = similarities[aid, mid]
-        p += 1
-
-    return links, similarities
-
-
-def contrastive_loss(links, similarities, tau=torch.tensor(0.7)):
-    loss = torch.tensor(0.)
-
-    # build similarity matrix S[i, j] = exp(sim(i,j)/\tau)(1-\delta(i, j))
-    S = torch.exp(similarities / tau)
-
-    # build link matrix L[i, j] == 1 iff mentions are linked, 0 else
-    L = links
-
-    nmentions = len(links)
-    for i in range(nmentions):
-        same_label = torch.nonzero(L[i, :])
-        if len(same_label) < 2:
-            continue
-        contrast = torch.sum(S[i, :])
-
-        loss += -1.0 / (len(same_label) - 1) * \
-            torch.sum(
-                    torch.log(
-                        S[i, same_label] / contrast
-                    )
-            )
-
-    return loss / nmentions
-
-
 def train(net, trainloader,
           test_graph, test_mentions, test_clusters,
           optimizer, scheduler,
@@ -232,11 +46,15 @@ def train(net, trainloader,
     global writer
 
     # diagnostic settings
-    count_per_eval = 25000
+    count_per_eval = 80000
     next_eval = count_per_eval
     t0 = time.time()
-    best_model_score = 0.
+    best_ana_score = 0.
+    best_muc_score = 0.
+
     word_count = args.word_count
+
+    anaphore_loss = torch.nn.BCEWithLogitsLoss()
 
     print('Start training for {:d} epochs.'.format(epochs))
 
@@ -252,13 +70,12 @@ def train(net, trainloader,
             net.train()
 
             # predict mentions, and vectors
-            id_out, gvec = net(train_graph)
+            gvec = net(train_graph)
 
             # predict coreference pairs:
 
             # correct mentions
             target = train_graph.ndata['coref'].view(-1).clamp(0, 1)
-            target.detach()
 
             # take the indices of the nodes that are gold-mentions
             mention_idxs = torch.nonzero(target)
@@ -271,14 +88,29 @@ def train(net, trainloader,
                         )
 
                 loss_sim = contrastive_loss(links, similarities)
+
+                anaphores = predict_anaphores(
+                        net,
+                        mentions
+                        )
+
+                targets = torch.tensor([
+                    mention.anaphore for mention in mentions
+                    ])
+
+                loss_ana = anaphore_loss(
+                        anaphores.view(-1),
+                        targets.view(-1)
+                        )
             else:
+                loss_ana = torch.tensor(0)
                 loss_sim = torch.tensor(0)
 
             # apply loss
-            loss_total = loss_sim   # + loss_id
+            loss_total = loss_sim + loss_ana
             optimizer.zero_grad()
 
-            # for batches without a mention,  the loss is zero and
+            # for batches without a mention, the loss is zero and
             # loss.backward() raises a RuntimeError
             try:
                 loss_total.backward()
@@ -292,15 +124,15 @@ def train(net, trainloader,
             word_count += len(train_graph)
             args.word_count = word_count
             writer.add_scalar('loss_sim', loss_sim.item(), word_count)
+            writer.add_scalar('loss_ana', loss_ana.item(), word_count)
             writer.add_scalar('loss_total', loss_total.item(), word_count)
 
             if word_count > next_eval:
                 dur = time.time() - t0
                 net.eval()
                 with torch.no_grad():
-                    id_out, gvec = net(test_graph)
+                    gvec = net(test_graph)
 
-                    # coreference pairs: score clustering on gold mentions
                     target = test_graph.ndata['coref'].view(-1).clamp(0, 1)
                     mention_idxs = torch.nonzero(target)
 
@@ -310,27 +142,44 @@ def train(net, trainloader,
                             gvec[mention_idxs]
                             )
 
-                    system_clusters = predict_clusters(
-                            similarities,
-                            nlinks=750,
-                            word_count=word_count
+                    # predict anaphores
+                    anaphores = torch.sigmoid(predict_anaphores(
+                            net, test_mentions
+                            ))
+
+                    # cluster using the predictions
+                    system_clusters = nearest_linking(
+                            similarities, anaphores
                             )
 
-                    score_sim_ar = adjusted_rand_score(
-                            test_clusters, system_clusters
-                            )
-                    score_sim_ami = adjusted_mutual_info_score(
-                            test_clusters, system_clusters
+                    # score the clustering
+                    system_set = clusters_to_sets(system_clusters)
+                    gold_set = clusters_to_sets(test_clusters)
+
+                    muc_prf = muc(gold_set, system_set)
+
+                    # score the anaphores
+                    targets = torch.tensor([
+                        mention.anaphore for mention in test_mentions
+                        ])
+
+                    ana_scores = PRF(
+                            targets,
+                            torch.round(anaphores),
+                            labels=[1.0]
                             )
 
                 # Report
                 print('Elements {:08d} |'.format(word_count),
-                      'AR {:.4f}|'.format(score_sim_ar),
                       'words/sec {:4.3f}'.format(count_per_eval / dur)
                       )
 
-                writer.add_scalar('s_sim_ar', score_sim_ar, word_count)
-                writer.add_scalar('s_sim_ami', score_sim_ami, word_count)
+                writer.add_scalar('s_ana_p', ana_scores[0], word_count)
+                writer.add_scalar('s_ana_r', ana_scores[1], word_count)
+                writer.add_scalar('s_ana_f', ana_scores[2], word_count)
+                writer.add_scalar('s_muc_p', muc_prf[0], word_count)
+                writer.add_scalar('s_muc_r', muc_prf[1], word_count)
+                writer.add_scalar('s_muc_f', muc_prf[2], word_count)
 
                 for name, param in net.state_dict().items():
                     writer.add_scalar(
@@ -340,12 +189,18 @@ def train(net, trainloader,
                             )
 
                 # Save best-until-now model
-                score = score_sim_ar
-                if epoch > 0 and score > best_model_score:
+                if epoch > 0 and (
+                                 ana_scores[2] > best_ana_score or
+                                 muc_prf[2] > best_muc_score
+                                 ):
+                    if ana_scores[2] > best_ana_score:
+                        best_ana_score = ana_scores[2]
+                    if muc_prf[2] > best_muc_score:
+                        best_muc_score = muc_prf[2]
+
                     logging.info('Saving new best model at step {:09d}'.format(
                         word_count
                         ))
-                    best_model_score = score
                     save_model(net)
 
                 # reset timer
@@ -360,13 +215,16 @@ def train(net, trainloader,
                 optimizer.param_groups[0]['lr'],
                 word_count-1
                 )
-        scheduler.step()
+        if scheduler:
+            scheduler.step()
 
 
 def save_model(model):
     d = model.state_dict()
     d['hyperparams'] = args
-    name = './runs_coref/{}/model_{:09d}.pt'.format(args.exp_name, args.word_count)
+    name = './runs_coref/{}/model_{:09d}.pt'.format(
+            args.exp_name, args.word_count
+            )
     torch.save(d, name)
 
 
@@ -391,7 +249,7 @@ parser.add_argument(
         '--batch_size',
         dest='batch_size',
         type=int,
-        default=150,
+        default=50,
         help='Evaluation batch size.'
         )
 parser.add_argument(
@@ -405,7 +263,7 @@ parser.add_argument(
         '--features',
         nargs='*',
         dest='features',
-        default=['UPOS', 'FEATS', 'DEPREL', 'WVEC'],
+        default=['DEPREL', 'WVEC'],
         choices=['UPOS', 'XPOS', 'FEATS', 'DEPREL', 'WVEC'],
         help='Features used by the model'
         )
@@ -426,7 +284,7 @@ parser.add_argument(
         '--solver',
         dest='solver',
         default='ADAM',
-        choices=['ADAM', 'SGD', 'ADAMW'],
+        choices=['ADAM', 'SGD', 'ADAMW', 'LAMB'],
         help='Optimizer (SGD/ADAM) and learning rate schedule',
         )
 parser.add_argument(
@@ -443,29 +301,18 @@ parser.add_argument(
         )
 
 
-def coref_collate(batch):
-    """
-    Collate function to batch samples together.
-    """
-
-    mentions = []
-    for g in batch:
-        mentions += get_mentions(g.sentence)
-    return dgl.batch(batch), mentions
-
-
 def main(args):
     global writer
 
     logging.basicConfig(level=logging.INFO)
 
     exp_name = args.solver + \
-        'v3.32' + \
+        'v4.11' + \
         '_{:1.0e}'.format(args.learning_rate) + \
         '_{:d}b'.format(args.batch_size) + \
         '_HL' + \
         '_{:d}d'.format(args.h_dims) + \
-        '_{:d}l'.format(args.h_layers) + \
+        '_{:d}l_'.format(args.h_layers) + \
         '_'.join(args.features)
 
     if 'WVEC' in args.features:
@@ -484,6 +331,7 @@ def main(args):
     train_raw = ConlluDataset(args.train_set)
     for sentence in train_raw:
         preprocess_sentence(sentence)
+    mark_gold_anaphores(train_raw)
 
     train_set = GraphDataset(
             dataset=train_raw,
@@ -493,7 +341,7 @@ def main(args):
     trainloader = DataLoader(
         train_set,
         batch_sampler=RandomBatchSampler(len(train_set), args.batch_size),
-        # num_workers=2,
+        num_workers=2,
         collate_fn=coref_collate
         )
 
@@ -503,6 +351,7 @@ def main(args):
     test_raw = ConlluDataset(args.test_set)
     for sentence in test_raw:
         preprocess_sentence(sentence)
+    mark_gold_anaphores(test_raw)
 
     test_set = GraphDataset(
             dataset=test_raw,
@@ -534,7 +383,8 @@ def main(args):
     logging.info('Building model.')
     net = CorefNet(
         in_feats=train_set.in_feats,
-        in_feats_b=(args.h_dims + 7) * 2 + 5,
+        in_feats_a=75 + 5,  # mention + mention_pair
+        in_feats_b=(args.h_dims + 75) * 2 + 5,
         h_layers=args.h_layers,
         h_dims=args.h_dims,
         activation='relu'

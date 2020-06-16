@@ -13,12 +13,14 @@ class Embedding(nn.Module):
             self,
             in_feats=64,
             out_feats=64,
-            activation='relu'
+            activation='relu',
+            batchnorm=True
             ):
         super(Embedding, self).__init__()
         self.in_feats = in_feats
         self.out_feats = out_feats
         self.activation = activation
+        self.batchnorm = batchnorm
 
         layers = []
 
@@ -30,8 +32,9 @@ class Embedding(nn.Module):
                 )
         layers.append(layer)
 
-        layer = nn.BatchNorm1d(self.out_feats)
-        layers.append(layer)
+        if self.batchnorm:
+            layer = nn.BatchNorm1d(self.out_feats)
+            layers.append(layer)
 
         if self.activation == 'relu':
             layer = nn.ReLU()
@@ -55,17 +58,33 @@ class MLP(nn.Module):
             in_feats=64,
             out_feats=64,
             activation='relu',
-            h_layers=2
+            h_layers=2,
+            batchnorm=True,
+            pyramid=False,
             ):
         super(MLP, self).__init__()
         self.in_feats = in_feats
         self.out_feats = out_feats
         self.activation = activation
         self.h_layers = h_layers
+        self.batchnorm = batchnorm
+        self.pyramid = pyramid
+
+        if pyramid:
+            delta_dims = (self.in_feats - self.out_feats) // self.h_layers
+        dims_remaining = self.in_feats
+
+        # 10 -> 2 in 2 layers
+        # delta = (10 - 2) // 2 =  8 // 2 = 4
+        # 10 -> 6 -> 2
+        # 211 -> 1 in 2 layers
+        # delta = (211 - 1) // 2 = 105
+        # 211 -> 106 -> 1
 
         layers = []
         for i in range(self.h_layers-1):
-            layer = nn.Linear(self.in_feats, self.in_feats)
+            layer = nn.Linear(dims_remaining, dims_remaining - delta_dims)
+            dims_remaining -= delta_dims
             nn.init.kaiming_uniform_(
                     layer.weight,
                     mode='fan_in',
@@ -73,8 +92,9 @@ class MLP(nn.Module):
                     )
             layers.append(layer)
 
-            layer = nn.BatchNorm1d(self.in_feats)
-            layers.append(layer)
+            if self.batchnorm:
+                layer = nn.BatchNorm1d(self.in_feats)
+                layers.append(layer)
 
             if self.activation == 'relu':
                 layer = nn.ReLU()
@@ -85,7 +105,7 @@ class MLP(nn.Module):
                 sys.exit(-1)
             layers.append(layer)
 
-        layer = nn.Linear(self.in_feats, self.out_feats)
+        layer = nn.Linear(dims_remaining, self.out_feats)
         nn.init.kaiming_uniform_(
                 layer.weight,
                 mode='fan_in',
@@ -399,6 +419,7 @@ class CorefNet(nn.Module):
             in_feats=16,
             h_layers=2,
             h_dims=16,
+            in_feats_a=36,
             in_feats_b=36,
             activation='relu'
             ):
@@ -406,13 +427,15 @@ class CorefNet(nn.Module):
         self.h_layers = h_layers
         self.h_dims = h_dims
         self.in_feats = in_feats
+        self.in_feats_a = in_feats_a
         self.in_feats_b = in_feats_b
         self.activation = activation
 
         # Embedding
         self.embedding = Embedding(
                 in_feats=self.in_feats,
-                out_feats=self.h_dims
+                out_feats=self.h_dims,
+                batchnorm=False
                 )
 
         # Hidden layers, each of h_dims to h_dims
@@ -422,15 +445,21 @@ class CorefNet(nn.Module):
                 num_layers=self.h_layers
                 )
 
+        self.task_a = MLP(
+                in_feats=self.in_feats_a,
+                out_feats=1,
+                h_layers=3,
+                batchnorm=False,
+                pyramid=True
+                )
+
         self.task_b = MLP(
                 in_feats=self.in_feats_b,
                 out_feats=1,
-                h_layers=3
+                h_layers=3,
+                batchnorm=False,
+                pyramid=True
                 )
-
-        # Weight factors for combining the two losses
-        self.loss_a = torch.nn.Parameter(torch.tensor([0.]))
-        self.loss_b = torch.nn.Parameter(torch.tensor([0.]))
 
     def forward(self, g):
         # Linear transform of one-hot-encoding to internal representation

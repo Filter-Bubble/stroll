@@ -1,12 +1,37 @@
 import torch
 
+import numpy as np
+
 from stroll.labels import frame_codec, role_codec
 
 from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.metrics.cluster import contingency_matrix
 
 from progress.bar import Bar
 import seaborn as sns
 import matplotlib.pyplot as plt
+
+
+def variation_of_information(clustA, clustB):
+    c = contingency_matrix(clustA, clustB)
+    pa = c.sum(axis=1)
+    pb = c.sum(axis=0)
+    logc = np.log(np.where(c < 1, 1, c))
+    logpa = np.broadcast_to(np.log(pa), (len(pb), len(pa))).transpose()
+    logpb = np.broadcast_to(np.log(pb), (len(pa), len(pb)))
+
+    return -np.sum(c * (2 * logc - logpa - logpb))
+
+
+def clusters_to_sets(clusters):
+    hashed_clusters = {}
+    for i, c in enumerate(clusters):
+        if c in hashed_clusters:
+            hashed_clusters[c].add(i)
+        else:
+            hashed_clusters[c] = set()
+            hashed_clusters[c].add(i)
+    return list(hashed_clusters.values())
 
 
 def evaluate(net, evalloader, fig_name, batch_size=50):

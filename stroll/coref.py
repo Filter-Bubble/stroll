@@ -3,11 +3,17 @@ import re
 import numpy as np
 
 import torch
+import dgl
 
 import logging
 
-from stroll.conllu import Token
+from stroll.conllu import transform_tree
 from stroll.labels import to_one_hot, mention_type_codec
+from stroll.labels import feats_codec, deprel_codec
+
+from functools import lru_cache
+
+MAX_MENTION_DISTANCE = 50
 
 # We always ignore punctuation, as they have the sentence root as head
 # For multiple heads per span, we take the 1st head (ie. with lowest token.ID)
@@ -19,12 +25,6 @@ from stroll.labels import to_one_hot, mention_type_codec
 ref_start = re.compile('^\((\d+)$')
 ref_end = re.compile('^(\d+)\)$')
 ref_one = re.compile('^\((\d+)\)$')
-
-COPULA_NOUN_DESC_MOVE_TO_VERB = [
-        'advcl', 'advmod', 'aux', 'aux:pass', 'case', 'cc', 'csubj', 'expl',
-        'expl:pv', 'iobj', 'mark', 'nsubj', 'obl', 'obl:agent', 'orphan',
-        'parataxis', 'punct'
-        ]
 
 ADJACENCY_SKIP_DEPREL = [
         'punct'
@@ -51,7 +51,8 @@ class Mention():
       refid     The entity this mention refers to
       start     The ID of the first token of the mention
       end       The ID of the last token of the mention
-      ids       The IDs of all tokens part of the mention
+      ids       List of Token.ID of all tokens part of the mention
+      anaphore  If the mention is an anaphore (1.0) or not (0.0)
 
       NOTE: The span corresponding to this mention is derived from
       the head, but processing has been done to remove syntax words.
@@ -66,13 +67,15 @@ class Mention():
                  refid=None,  # The entity this mention refers to
                  start=None,  # The ID of the first token of the mention
                  end=None,  # The ID of the last token of the mention
-                 ids=None  # The IDs of all tokens part of the mention
+                 ids=None,  # The IDs of all tokens part of the mention,
+                 anaphore=1.0  # If the mention is an anaphore
                  ):
         self.sentence = sentence
         self.head = head
         self.refid = refid
         self.start = start
         self.end = end
+        self.anaphore = anaphore
         if ids:
             self.ids = ids
         else:
@@ -85,6 +88,7 @@ class Mention():
         p += 'refid= {}\n'.format(self.refid)
         p += 'head=  {}\n'.format(self.head)
         p += 'span=  {}-{}\n'.format(self.start, self.end)
+        p += 'text= {}\n'.format([self.sentence[i].FORM for i in self.ids])
         return p
 
     def type(self):
@@ -216,13 +220,13 @@ def mentions_match_relaxed(mentionA, mentionB):
     if len(contentA) <= len(contentB):
         for FORM in contentA:
             if FORM not in contentB:
-                return 0.0
+                return 0
+        return len(contentA) / len(contentB)
     else:
         for FORM in contentB:
             if FORM not in contentA:
                 return 0.0
-
-    return 1.0
+        return len(contentB) / len(contentA)
 
 
 def mentions_overlap(mentionA, mentionB):
@@ -243,11 +247,15 @@ def mentions_overlap(mentionA, mentionB):
     return 0.0
 
 
+@lru_cache(maxsize=500)
 def features_mention(mention):
-    # 01_MentionType
-    # 02_MentionLength
-    # 03_MentionNormLocation
-    # 04_IsMentionNested
+    # 01_MentionType                 4
+    #    FEATS                       33
+    #    DEPREL                      36
+    # 02_MentionLength               1
+    # 03_MentionNormLocation         1
+    # 04_IsMentionNested             1
+    # total                          76
 
     sentence = mention.sentence
     dataset = sentence.dataset
@@ -257,6 +265,8 @@ def features_mention(mention):
 
     return torch.cat((
         to_one_hot(mention_type_codec, mention.type()),
+        to_one_hot(feats_codec, sentence[mention.head].FEATS.split('|')),
+        to_one_hot(deprel_codec, sentence[mention.head].DEPREL),
         torch.tensor([
             len(mention.ids),
             norm_location,
@@ -265,12 +275,14 @@ def features_mention(mention):
         ))
 
 
+@lru_cache(maxsize=500)
 def features_mention_pair(mentionA, mentionB):
-    # 03_HeadsAgree
-    # 04_ExactStringMatch
-    # 05_RelaxedStringMatch
-    # 06_SentenceDistance
-    # 08_Overlapping
+    # 03_HeadsAgree             1
+    # 04_ExactStringMatch       1
+    # 05_RelaxedStringMatch     1
+    # 06_SentenceDistance       1
+    # 08_Overlapping            1
+    #                           5
     return torch.tensor([
         mentions_heads_agree(mentionA, mentionB),
         mentions_match_exactly(mentionA, mentionB),
@@ -329,7 +341,8 @@ def build_mentions_from_heads(sentence, heads):
                     refid=sentence[head].COREF,
                     start=head,
                     end=head,
-                    ids=[head]
+                    ids=[head],
+                    anaphore=sentence[head].anaphore
                     )
             )
             continue
@@ -387,13 +400,15 @@ def build_mentions_from_heads(sentence, heads):
                     refid=sentence[head].COREF,
                     start=sentence[id_start].ID,
                     end=sentence[id_end].ID,
-                    ids=[sentence[i].ID for i in pruned_ids]
+                    ids=[sentence[i].ID for i in pruned_ids],
+                    anaphore=sentence[head].anaphore
                     )
             )
 
     return mentions
 
 
+@lru_cache(maxsize=50000)
 def get_mentions(sentence):
     """
     Return a list of Mention objects, from the annotation in the sentence.
@@ -408,9 +423,10 @@ def get_mentions(sentence):
     return build_mentions_from_heads(sentence, heads)
 
 
-def mark_anaphoric_mentions(dataset):
+def mark_gold_anaphores(dataset):
     """
-    Set the Token.AN for each mention in the dataset.
+    Set the Token.anaphore for each mention in the dataset from the current
+    head-based token.COREF clusters.
     """
     doc_rank = 0
     entities = {}
@@ -423,178 +439,10 @@ def mark_anaphoric_mentions(dataset):
                 continue
             if token.COREF in entities:
                 entities[token.COREF] += 1
-                token.AN = 1.0
+                token.anaphore = 1.0
             else:
                 entities[token.COREF] = 1
-                token.AN = 0.0
-    return
-
-
-def transform_coordinations(sentence):
-    """
-    Transform UD coordination to be more like SD coordination.
-
-    Universal Dependency style coordination is not suitable for our head-based
-    approach; in the text '.. A and B ..' the possible heads are:
-
-    A which will correspond to the text 'A and B'
-    B which will correspond to 'and B'.
-
-    Add an extra node, and transform the dependency graph, to allow selecting:
-    'A', 'and B', 'A and B'
-    """
-
-    # find all coordinations, ie. tokens with DEPREL = 'conj'
-    coordinations = {}
-    for token in sentence:
-        if token.DEPREL == 'conj':
-            # identify the coordinations by the head
-            coordination_id = token.HEAD
-            if coordination_id in coordinations:
-                coordinations[coordination_id].append(token.ID)
-            else:
-                coordinations[coordination_id] = [token.ID]
-
-    # transform each coordination
-    #           ^                           ^
-    #           | deprel                    | deprel
-    #         tokenA              =>       tokenX
-    #       /conj    \ conj          /conj  |conj  \conj
-    #   tokenB        tokenC      tokenA   tokenB   tokenC
-    for tokenA_id in coordinations:
-        coordination = coordinations[tokenA_id]
-        tokenA = sentence[tokenA_id]
-
-        # attach tokens directly to the original HEAD of the first token
-        for token_id in coordination:
-            sentence[token_id].HEAD = tokenA.HEAD
-
-        # create a dummy node to represent the full coordination
-        tokenX = Token([
-            '{}'.format(len(sentence) + 1),  # ID
-            '',  # FORM
-            '',  # LEMMA
-            '_',  # UPOS
-            '_',  # XPOS
-            '_',  # FEATS
-            tokenA.HEAD,
-            tokenA.DEPREL,
-            tokenA.DEPS,
-            tokenA.MISC,
-            tokenA.FRAME,
-            tokenA.ROLE,
-            '_'  # COREF
-            ])
-
-        # attach all tokens to the dummy
-        for token_id in coordination:
-            sentence[token_id].HEAD = tokenX.ID
-
-        tokenA.HEAD = tokenX.ID
-        tokenA.DEPREL = 'conj'
-        tokenA.FRAME = '_'
-        tokenA.ROLE = '_'
-
-        sentence.add(tokenX)
-
-        # fix remaining issues:
-        # - punctuation is a child of the root token
-        if tokenX.DEPREL == 'root':
-            for token in sentence:
-                if token.DEPREL == 'punct':
-                    token.HEAD = tokenX.ID
-
-    return sentence
-
-
-def swap_copula(sentence, noun, verb):
-    """
-    We promote the copula token to be the head (like other verbs would be),
-    and attach the mention to it.  We then try to clean up the graph by moving
-    a number of descendants of the old head (ie part the mention) to the
-    copula. The choice is based on the DEPREL, for a list see
-    COPULA_NOUN_DESC_MOVE_TO_VERB.
-    """
-    # 1. swap the deprel of the 'cop' and its syntactic head
-    # (lets call it its noun)
-    verb.DEPREL = noun.DEPREL
-    noun.DEPREL = 'cop'
-    verb.HEAD = noun.HEAD
-    noun.HEAD = verb.ID
-
-    # 2. of the dependents of the noun, move some to the verb
-    for token in sentence:
-        if token.HEAD == noun.ID:
-            if token.DEPREL in COPULA_NOUN_DESC_MOVE_TO_VERB:
-                token.HEAD = verb.ID
-
-    return sentence
-
-
-def transform_copulas(sentence):
-    """
-    Transform the UD copola usage.
-
-    We focus on Dutch, which has explicit copolas: 'Dat is fantastisch.'
-    UD requires 'Dat' to be the head, which leads to mentions spanning the
-    whole sentence, which in turn will confuse all our mention and pairwise
-    mention features (nesting, matching).
-
-    For cases with multiple linked copulas 'Dat is en blijft fantastisch',
-    we set the DEPREL to 'conj', like UD does for normal verbs.
-    """
-    # 1. gather all 'cop' that point to another 'cop'
-    copulas = []
-    chained_copulas = []
-    for token in sentence:
-        if token.DEPREL != 'cop':
-            continue
-        if token.HEAD == '0':
-            # Inconceivable! DEPREL == 'cop', but HEAD == '0'
-            return sentence
-
-        if sentence[token.HEAD].DEPREL == 'cop':
-            # we have a -cop-> b -cop-> ..
-            # turn this into a conjunction
-            chained_copulas.append(token)
-        else:
-            copulas.append(token)
-
-    # if we didnt find any copulas we're done
-    if len(copulas) == 0:
-        return sentence
-
-    # 2. change the releation to conj
-    for token in chained_copulas:
-        token.DEPREL = 'conj'
-
-    # 3. swap the noun and verb
-    for verb in copulas:
-        noun = sentence[verb.HEAD]
-        swap_copula(sentence, noun, verb)
-
-    # 4. Clean-up:, all 'punct' must point to the head
-    for token in sentence:
-        if token.HEAD == '0':
-            # found the head
-            head_id = token.ID
-            break
-
-    for token in sentence:
-        if token.DEPREL == 'punct':
-            token.HEAD = head_id
-
-    return sentence
-
-
-def transform_tree(sentence):
-    """
-    Make dependency graph better suited for our task.
-    This calls: transform_copulas and transform_coordinations.
-    """
-    sentence = transform_copulas(sentence)
-    sentence = transform_coordinations(sentence)
-    return sentence
+                token.anaphore = 0.0
 
 
 def get_mentions_from_bra_ket(sentence):
@@ -856,3 +704,169 @@ def postprocess_sentence(sentence):
 
             sentence[mention.end].COREF = aend
         sentence[mention.start].COREF = astart
+
+
+def nearest_linking(similarities, anaphores, margin=0):
+    nmentions = len(similarities)
+    entities = []
+
+    for i in range(1, nmentions):
+        # link if allowed / allowed
+        linked = False
+        if anaphores[i] > 0.5 + margin:
+            # take the similarity to all possible antecendents
+            antecedent_sims = similarities[0:i, i]
+
+            # find the most similar
+            antecedent = torch.argmax(antecedent_sims)
+            if isinstance(antecedent, torch.Tensor):
+                # we store plain integers in the sets
+                antecedent = antecedent.item()
+
+            # find the set that contains the antecedent
+            for entity in entities:
+                if antecedent in entity:
+                    entity.add(i)
+                    linked = True
+                    break
+
+        if not linked:
+            # start a new entity
+            entities.append(set([i]))
+
+    clusters = np.zeros(nmentions)
+    for e, entity in enumerate(entities):
+        for i in entity:
+            clusters[i] = e
+
+    return clusters
+
+
+def mentions_can_link(aid, mid, antecedent, mention):
+    """
+    Deterimine if mentions are allowed to link:
+    they should be from the same document, and withn MAX_MENTION_DISTANCE from
+    eachother.
+    """
+    if mid - aid >= MAX_MENTION_DISTANCE:
+        # TODO: fill with exponentially decaying similarity?
+        return False
+
+    if antecedent.sentence.doc_rank != mention.sentence.doc_rank:
+        # TODO: fill with very low similarities?
+        return False
+
+    return True
+
+
+def predict_similarities(net, mentions, gvec):
+    """
+        net       a CorefNet instance
+        mentions  a list of Mentions
+        gvec      the graph-convolutioned vectors for the mentions
+
+    returns:
+      similarities   torch.tensor(nmentions, nmetsions)
+      link           torch.tensor(nmentions, nmentions)
+    """
+
+    nmentions = len(mentions)
+    links = torch.zeros([nmentions, nmentions])
+    similarities = torch.ones([nmentions, nmentions]) * -1e8
+
+    # build a list of antecedents, and the pair vectors
+    vectors = []
+    aids, mids = np.triu_indices(nmentions, 1)
+    for aid, mid in zip(aids, mids):
+        if not mentions_can_link(aid, mid,
+                                 mentions[aid], mentions[mid]):
+            continue
+
+        antecedent = mentions[aid]
+        mention = mentions[mid]
+
+        if antecedent.refid == mention.refid:
+            links[aid, mid] = 1
+            links[mid, aid] = 1
+
+        # build pair (aidx, midx)
+        vectors.append(
+            torch.cat((
+                gvec[mid].view(-1),
+                features_mention(mention),
+                features_mention_pair(
+                    antecedent,
+                    mention),
+                gvec[aid].view(-1),
+                features_mention(antecedent)
+                )
+            )
+        )
+
+    # get the similarity between those pairs
+    pairsim = net.task_b(torch.stack(vectors))
+
+    p = 0
+    for aid, mid in zip(aids, mids):
+        if not mentions_can_link(aid, mid,
+                                 mentions[aid], mentions[mid]):
+            continue
+
+        similarities[aid, mid] = pairsim[p]
+        similarities[mid, aid] = similarities[aid, mid]
+        p += 1
+
+    return links, similarities
+
+
+def predict_anaphores(net, mentions):
+    """
+        net       a CorefNet instance
+        mentions  a list of Mentions
+
+    returns:
+      anpahoric torch.tensor(nmentions )
+    """
+    nmentions = len(mentions)
+    anaphore = []
+
+    for mid in range(nmentions):
+        mention = mentions[mid]
+        vectors = []
+        for aid in range(0, mid):
+            if not mentions_can_link(aid, mid,
+                                     mentions[aid], mentions[mid]):
+                continue
+
+            antecedent = mentions[aid]
+
+            # build pair (aidx, midx)
+            vectors.append(torch.cat((
+                    features_mention(mention),
+                    features_mention_pair(
+                        antecedent,
+                        mention),
+            )))
+
+        if len(vectors) > 0:
+            anaphore.append(torch.mean(
+                torch.stack(vectors),
+                dim=0
+            ))
+        else:
+            # no antecedents, so cannot be an anaphore
+            anaphore.append(torch.zeros(80))
+
+    # feed the vectors through the network, and return the result
+    return net.task_a(torch.stack(anaphore))
+
+
+def coref_collate(batch):
+    """
+    Collate function to batch samples together.
+    """
+
+    mentions = []
+    for g in batch:
+        mentions += get_mentions(g.sentence)
+    return dgl.batch(batch), mentions
