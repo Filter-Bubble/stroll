@@ -104,6 +104,13 @@ class Mention():
 
         return 'NOMINAL'
 
+    def get_identifier(self):
+        sentence = self.sentence
+        return '{}_{}_{}'.format(
+                sentence.doc_id,
+                sentence.sent_id,
+                self.head)
+
     def nested(self):
         """A mention is nested if any of its parents are a mention."""
         sentence = self.sentence
@@ -367,7 +374,7 @@ def build_mentions_from_heads(sentence, heads):
 
         pruned_ids = []
         for id in ids:
-            if id not in ids_to_prune:
+            if (id not in ids_to_prune) and (sentence[id].FORM != ''):
                 pruned_ids.append(id)
 
         if len(pruned_ids) == 0:
@@ -382,15 +389,8 @@ def build_mentions_from_heads(sentence, heads):
                 sentence[pruned_ids[0]].UPOS in MENTION_REMOVE_LEADING:
             pruned_ids = pruned_ids[1:]
 
-        # we have a potential issue with the extra, empty, list tokens
-        # (they are added by transform_coordinations)
-        # When validating, empty tokens are not printed, and the span
-        # would be malformed.
-        # move the end of the span until it is not an empty token.
         id_start = pruned_ids[0]
         id_end = pruned_ids[-1]
-        while sentence[id_end].FORM == '' and id_end > id_start:
-            id_end -= 1
 
         if len(pruned_ids) > 0:
             mentions.append(
@@ -408,7 +408,6 @@ def build_mentions_from_heads(sentence, heads):
     return mentions
 
 
-@lru_cache(maxsize=50000)
 def get_mentions(sentence):
     """
     Return a list of Mention objects, from the annotation in the sentence.

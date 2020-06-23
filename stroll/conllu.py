@@ -387,7 +387,7 @@ def transform_coordinations(sentence):
             '',  # LEMMA
             '_',  # UPOS
             '_',  # XPOS
-            '_',  # FEATS
+            'Number=Plur',  # FEATS
             tokenA.HEAD,
             tokenA.DEPREL,
             tokenA.DEPS,

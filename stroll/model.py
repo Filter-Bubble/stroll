@@ -72,6 +72,8 @@ class MLP(nn.Module):
 
         if pyramid:
             delta_dims = (self.in_feats - self.out_feats) // self.h_layers
+        else:
+            delta_dims = 0
         dims_remaining = self.in_feats
 
         # 10 -> 2 in 2 layers
@@ -469,3 +471,27 @@ class CorefNet(nn.Module):
         g = self.kernel(g)
 
         return g.ndata['h']
+
+
+class EntityNet(nn.Module):
+    def __init__(self):
+        super(EntityNet, self).__init__()
+
+        self.new_entity_prob = MLP(6, 1, h_layers=1)
+
+        # MAX_CANDIDATES * 41 -> MAX_CANDIDATES
+        self.combine_evidence = MLP(25 * 41, 25, pyramid=True, batchnorm=False)
+
+        # MAX_CANDIDATES+1 -> MAX_CANDIDATES+1
+        self.pick_action = MLP(25 + 1, 25 + 1, pyramid=True, batchnorm=False)
+
+        # self.default_compatability = torch.nn.Parameter(
+        #         torch.tensor(0.1)
+        #         )
+        # self.combine_noun_evidence = MLP(32 + 1 + 1, 1,
+        #                                  pyramid=True, batchnorm=False)
+        # self.combine_pronoun_evidence = MLP(32 + 1 + 1, 1,
+        #                                     pyramid=True, batchnorm=False)
+
+    def forward(self, m):
+        return torch.rand(10)
