@@ -1,4 +1,5 @@
 import signal
+from functools import lru_cache
 import argparse
 import logging
 
@@ -17,7 +18,7 @@ from stroll.model import EntityNet
 from stroll.labels import to_one_hot
 from stroll.labels import feats_codec, deprel_codec, mention_type_codec
 
-MAX_CANDIDATES = 25
+MAX_CANDIDATES = 20
 
 # Global arguments for dealing with Ctrl-C
 global writer
@@ -62,6 +63,25 @@ def wordvector_for_mention(mention):
     return wordvector[sentence[mention.head].FORM.lower()]
 
 
+@lru_cache(maxsize=100)
+def modifiers_for_mention(mention):
+    """
+    Return the set of modifiers (token.FORM.lower()) that directly attach
+    to the mentions' head (ie. have DEPREL 'nmod' or 'amod').
+    """
+    mods = set()
+
+    sentence = mention.sentence
+
+    for id in mention.ids:
+        token = sentence[id]
+        if token.HEAD == mention.head:
+            # attach directly to the mentions' head
+            if token.DEPREL in ['nmod', 'amod']:
+                mods.add(token.FORM.lower())
+    return mods
+
+
 class Entity():
     def __init__(self):
         self.mentions = []
@@ -69,6 +89,7 @@ class Entity():
         self.proper_nouns = set()
         self.nouns = set()
         self.pronouns = set()
+        self.modifiers = set()
         self.features = torch.zeros(len(feats_codec.classes_))
 
     def _calculate_features(self):
@@ -121,12 +142,33 @@ class Entity():
         else:
             self.gold_entities[gold_entity] = 1
 
+        # precaluate features from the conll FEATS column
         self._calculate_features()
+
+        # modifiers:
+        # add all 'amon' and 'nmod' directly attached to the mentions' head
+        self.modifiers = self.modifiers.union(modifiers_for_mention(mention))
 
     def as_set(self):
         return set(
                 [mention.get_identifier() for mention in self.mentions]
                 )
+
+
+def modifier_agreement_entity_mention(entity, mention):
+    """
+    The ratio of shared modifiers between the mention and the entity
+    to the number of modifiers of the mention.
+    dims = 1
+    """
+    mods = modifiers_for_mention(mention)
+
+    if len(mods) == 0 or len(entity.modifiers) == 0:
+        return torch.zeros(1)
+
+    shared_mods = len(entity.modifiers.intersection(mods))
+
+    return torch.tensor([1.0 * shared_mods / len(mods)])
 
 
 def quantized_distance_top_to_mention(entity, mention):
@@ -282,12 +324,14 @@ def precise_constructs_top_to_mention(entity, mention):
     if not (tdr == 'conj' and mdr == 'conj'):
         if mention.ids[-1] < top.ids[0]:
             # the order is: mention - top
-            separation = top.ids[0] - mention.ids[-1]
-            separator = mention.ids[-1] + 1
+            separation = sentence.index(top.ids[0]) - \
+                    sentence.index(mention.ids[-1])
+            separator = sentence.index(mention.ids[-1]) + 1
         else:
             # the order is: top - mention
-            separation = mention.ids[0] - top.ids[-1]
-            separator = top.ids[-1] + 1
+            separation = sentence.index(mention.ids[0]) - \
+                    sentence.index(top.ids[-1])
+            separator = sentence.index(top.ids[-1]) + 1
 
         if separation == 0 or (
                 separation == 1 and sentence[separator].DEPREL == 'punct'
@@ -353,6 +397,9 @@ def action_add_probabilities(net, entities=[], mention=None):
             #  * 1 string_match_entity_to_mention
             string_match_entity_to_mention(entity, mention),
 
+            #  * 1 modifiers agreement
+            modifier_agreement_entity_mention(entity, mention),
+
             #  * 32 feature match entity
             entity.features * features_for_mention(mention),
 
@@ -363,13 +410,16 @@ def action_add_probabilities(net, entities=[], mention=None):
             semantic_role_similiarty_top_to_mention(entity, mention),
 
             #  * 1 quantized_distance_top_to_mention
-            quantized_distance_top_to_mention(entity, mention)
+            quantized_distance_top_to_mention(entity, mention),
+
+            # * 3 precise_constructs_top_to_mention
+            precise_constructs_top_to_mention(entity, mention)
             ]))
 
     while len(input) < MAX_CANDIDATES:
-        input.append(torch.zeros(41))
+        input.append(torch.zeros(45))
 
-    # pass through network MAX_CANDIDATES * 41 -> MAX_CANDIDATES
+    # pass through network MAX_CANDIDATES * 45 -> MAX_CANDIDATES
     input = torch.cat(input)
     return net.combine_evidence(input)
 
@@ -406,6 +456,14 @@ def oracle_losses(entities=[], mention=None):
 def train_one(net, entities=[], mention=None, dynamic_oracle=False):
     net.train()
 
+    # short cut for single action
+    # this prevents blowing up the new_entity_prob in the backward pass
+    if len(entities) == 0:
+        new_entity = Entity()
+        new_entity.add(mention)
+        entities.append(new_entity)
+        loss = torch.zeros(1, requires_grad=True)
+
     # sort entities by distance
     ranking = []
     for entity in entities:
@@ -428,28 +486,31 @@ def train_one(net, entities=[], mention=None, dynamic_oracle=False):
     all_probs = net.pick_action(picked)
 
     # drop entries for non-existant entities
-    all_probs = torch.softmax(
-            all_probs[0:len(candidates) + 1],
-            dim=0
-            )
+    all_probs = all_probs[0:len(candidates) + 1]
 
     # pick the most likely action for a dynamic oracle
     dynamic_action = all_probs.argmax().item()
 
-    # ask the oracle for losses for a static oracle
-    losses = oracle_losses(candidates, mention)
-    static_action = losses.argmin().item()
+    # ask the oracle for costs
+    costs = oracle_losses(candidates, mention)
+    oracle_action = costs.argmin().item()
 
     # hingeloss
-    loss = torch.mean(torch.relu(
-            0.05 + all_probs - all_probs[static_action]
+    all_probs = torch.softmax(all_probs, dim=0)
+    loss = torch.sum(torch.relu(
+            0.05 + all_probs - all_probs[oracle_action]
             )**2.0)
+
+    # boost loss for non-new entity
+    if oracle_action != 0:
+        loss = loss * 10.
 
     if dynamic_oracle:
         action = dynamic_action
     else:
-        action = static_action
+        action = oracle_action
 
+    # print('Oracle:', oracle_action, 'Action:', dynamic_action, 'Loss:', loss)
     if action == 0:
         # start a new entity
         new_entity = Entity()
@@ -507,12 +568,12 @@ def eval(net, doc):
             new_entity.add(mention)
             new_entity.rank = len(entities)
             entities.append(new_entity)
-            trace += ' {}N'.format(new_entity.rank)
+            trace += ' {} '.format(new_entity.rank)
         else:
             # add to existing entity
             existing_entity = candidates[action - 1]
             existing_entity.add(mention)
-            trace += ' {} '.format(existing_entity.rank)
+            trace += ' {}L'.format(existing_entity.rank)
     logging.info(trace)
 
     # score the entities
@@ -541,7 +602,7 @@ def eval(net, doc):
 
 
 def train(net, test_docs, train_docs,
-          learning_rate=1e-3, epochs=1):
+          learning_rate=1e-2, epochs=1):
 
     sampler = RandomSampler(train_docs)
     optimizer = torch.optim.Adam(
@@ -569,8 +630,6 @@ def train(net, test_docs, train_docs,
                 total_loss += train_one(net, entities, mention)
 
             args.word_count += 1
-            total_loss = total_loss / len(doc)
-            writer.add_scalar('total_loss', total_loss.item(), args.word_count)
 
             if total_loss.requires_grad:
                 optimizer.zero_grad()
@@ -579,6 +638,11 @@ def train(net, test_docs, train_docs,
                 # update parameters
                 optimizer.step()
 
+            writer.add_scalar(
+                    'total_loss',
+                    total_loss.item(),
+                    args.word_count
+                    )
             for name, param in net.state_dict().items():
                 writer.add_scalar(
                         'norm_' + name,
@@ -636,7 +700,7 @@ def main(args):
     logging.basicConfig(level=logging.INFO)
 
     exp_name = 'entity' + \
-        '_v0.10'
+        '_v0.20_{}'.format(MAX_CANDIDATES)
 
     args.exp_name = exp_name
     print('Experiment {}'.format(args.exp_name))
@@ -697,7 +761,7 @@ def main(args):
     # signal.signal(signal.SIGTERM, sigterm_handler)
     # signal.signal(signal.SIGINT, sigterm_handler)
 
-    net = EntityNet()
+    net = EntityNet(max_candidates=MAX_CANDIDATES)
 
     args.word_count = 0
     train(net, test_docs, train_docs, epochs=1000)

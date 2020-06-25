@@ -474,16 +474,24 @@ class CorefNet(nn.Module):
 
 
 class EntityNet(nn.Module):
-    def __init__(self):
+    def __init__(self, max_candidates=25):
         super(EntityNet, self).__init__()
+
+        self.max_candidates = max_candidates
 
         self.new_entity_prob = MLP(6, 1, h_layers=1)
 
-        # MAX_CANDIDATES * 41 -> MAX_CANDIDATES
-        self.combine_evidence = MLP(25 * 41, 25, pyramid=True, batchnorm=False)
+        # MAX_CANDIDATES * 45 -> MAX_CANDIDATES
+        self.combine_evidence = MLP(
+                self.max_candidates * 45,
+                self.max_candidates,
+                pyramid=True, batchnorm=False)
 
         # MAX_CANDIDATES+1 -> MAX_CANDIDATES+1
-        self.pick_action = MLP(25 + 1, 25 + 1, pyramid=True, batchnorm=False)
+        self.pick_action = MLP(
+                self.max_candidates + 1,
+                self.max_candidates + 1,
+                pyramid=True, batchnorm=False)
 
         # self.default_compatability = torch.nn.Parameter(
         #         torch.tensor(0.1)
