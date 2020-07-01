@@ -267,7 +267,6 @@ class ConlluDataset(Dataset):
         # <empty line>
         sentence = Sentence()
         doc_current_id = filename
-        doc_sent_count = 0
         for line in conllu_raw:
 
             # remove possible trailing newline and whitespace
@@ -282,37 +281,46 @@ class ConlluDataset(Dataset):
                 sentence.set_full_text(line[9:])
                 continue
             elif line[0:8] == '# newdoc':
-                # keep track of the length of the document
-                if doc_sent_count != 0:
-                    self.doc_lengths[doc_current_id] = doc_sent_count
-
                 # store doc id if present: '# newdoc id = mf920901-001'
                 if len(line) > 14:
                     doc_current_id = line[14:]
                 else:
                     doc_current_id = '{filename}-{:06d}'.format(
                             filename, len(self.doc_lengths))
-                doc_sent_count = 0
             elif line[0:1] == '#':
                 # ignore comments
                 continue
             elif len(line) == 0:
                 # newline means end of a sentence
                 if len(sentence) > 0:
-                    sentence.sent_rank = doc_sent_count
-                    sentence.doc_rank = len(self.doc_lengths)
                     sentence.doc_id = doc_current_id
-                    sentence.dataset = self
-
-                    self.sentences.append(sentence)
-                    doc_sent_count += 1
+                    self.add(sentence)
 
                 # start a new sentence
                 sentence = Sentence()
             else:
                 fields = line.split('\t')
                 sentence.add(Token(fields))
-        self.doc_lengths[doc_current_id] = doc_sent_count
+
+        # if the file does not end in an empty line,
+        # assume the sentence is finished and add it anyways
+        if len(sentence) > 0:
+            sentence.doc_id = doc_current_id
+            self.add(sentence)
+
+    def add(self, sentence):
+        if sentence.doc_id in self.doc_lengths:
+            sentence.sent_rank = self.doc_lengths[sentence.doc_id]
+            self.doc_lengths[sentence.doc_id] += 1
+        else:
+            sentence.sent_rank = 0
+            self.doc_lengths[sentence.doc_id] = 1
+
+        sentence.doc_rank = \
+            list(self.doc_lengths.keys()).index(sentence.doc_id)
+
+        sentence.dataset = self
+        self.sentences.append(sentence)
 
     def __getitem__(self, index):
         return self.sentences[index]

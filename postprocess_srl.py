@@ -18,11 +18,16 @@ parser = argparse.ArgumentParser(
         )
 parser.add_argument(
         '--model',
+        default='models/srl.pt',
         help='Stroll model to use'
         )
 parser.add_argument(
         'input',
         help='Input conllu file to annotate'
+        )
+parser.add_argument(
+        '--output',
+        help='Input output conllu file'
         )
 
 
@@ -173,7 +178,7 @@ if __name__ == '__main__':
             h_layers=hyperparams.h_layers,
             h_dims=hyperparams.h_dims,
             out_feats_a=2,
-            out_feats_b=21,
+            out_feats_b=19,
             activation='relu'
             )
     net.load_state_dict(state_dict)
@@ -238,6 +243,10 @@ if __name__ == '__main__':
                 print('# text = ', sentence.full_text)
                 for fid in frames:
                     print(frames[fid])
-                    if len(orphans) > 0:
-                        print(orphans)
+                if len(orphans) > 0:
+                    print(orphans)
                 print('\n')
+
+    if args.output:
+        with open(args.output, 'w') as f:
+            f.write(eval_set.dataset.__repr__())

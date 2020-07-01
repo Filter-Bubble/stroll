@@ -212,3 +212,23 @@ The idea is to minimize the KL divergence of ensemble.
 11. [On Loss Functions for Deep Neural Networks in Classification](https://arxiv.org/abs/1702.05659)
 12. [Training Products of Experts by Minimizing Contrastive Divergence](https://www.mitpressjournals.org/doi/10.1162/089976602760128018)
 13. [Selecting weighting factors in logarithmic opinion pools.pdf](https://dl.acm.org/doi/10.5555/3008904.3008942)
+
+
+
+# best srl:
+runs_srl/ADAM_1e-02_FL1.50e+00cst_50b_100d_2l_reluUPOS_FEATS_DEPREL_WVEC_FT100/model_005925154.pt.eval
+
+# best mention:
+runs_mentions/ADAMv3.32_1e-03_150b_HL_64d_2lUPOS_FEATS_DEPREL_WVEC_FT50/model_030325091.pt
+
+# best coref:
+runs_coref/ADAMv4.11_1e-03_50b_HL_100d_2l_WVEC_DEPREL_FT50/model_005840868.pt
+
+# best entity:
+
+# try it:
+python3 run_stanza.py --output jenj.conll jip_en_janneke.txt
+python3 postprocess_srl.py --output jenj_srl.conll jenj.conll
+python3 run_mentions.py --output jenj_mentions.conll jenj_srl.conll
+python3 run_coref.py --html jenj.html --output jenj_all.conll jenj_mentions.conll
+google-chrome jenj.html

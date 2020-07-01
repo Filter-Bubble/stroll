@@ -9,3 +9,4 @@ progress
 argparse
 fasttext
 seaborn
+Jinja2
