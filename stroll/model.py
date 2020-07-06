@@ -479,11 +479,15 @@ class EntityNet(nn.Module):
 
         self.max_candidates = max_candidates
 
-        self.new_entity_prob = MLP(6, 1, h_layers=1)
+        self.new_entity_prob = MLP(
+                8,
+                1,
+                h_layers=1,
+                batchnorm=False)
 
-        # MAX_CANDIDATES * 45 -> MAX_CANDIDATES
+        # MAX_CANDIDATES * 46 -> MAX_CANDIDATES
         self.combine_evidence = MLP(
-                self.max_candidates * 45,
+                self.max_candidates * 46,
                 self.max_candidates,
                 pyramid=True, batchnorm=False)
 

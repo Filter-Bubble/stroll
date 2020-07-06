@@ -13,6 +13,8 @@ from stroll.coref import preprocess_sentence, postprocess_sentence
 from stroll.model import MentionNet
 from stroll.labels import FasttextEncoder
 
+# TODO: always label arguments ArgN as a mention?
+
 parser = argparse.ArgumentParser(
         description='Run a mention detection network'
         )

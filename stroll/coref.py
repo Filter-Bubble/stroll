@@ -709,6 +709,9 @@ def nearest_linking(similarities, anaphores, margin=0):
     nmentions = len(similarities)
     entities = []
 
+    # start a new entity for the first mention
+    entities.append(set([0]))
+
     for i in range(1, nmentions):
         # link if allowed / allowed
         linked = False
@@ -734,9 +737,9 @@ def nearest_linking(similarities, anaphores, margin=0):
             entities.append(set([i]))
 
     clusters = np.zeros(nmentions)
-    for e, entity in enumerate(entities):
+    for refid, entity in enumerate(entities):
         for i in entity:
-            clusters[i] = e
+            clusters[i] = refid
 
     return clusters
 
@@ -765,7 +768,7 @@ def predict_similarities(net, mentions, gvec):
         gvec      the graph-convolutioned vectors for the mentions
 
     returns:
-      similarities   torch.tensor(nmentions, nmetsions)
+      similarities   torch.tensor(nmentions, nmentions)
       link           torch.tensor(nmentions, nmentions)
     """
 

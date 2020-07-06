@@ -47,6 +47,8 @@ parser.add_argument(
         )
 parser.add_argument(
         '--score',
+        action='store_true',
+        default=False,
         help='Score coreference using annotation from the input'
         )
 parser.add_argument(
@@ -133,7 +135,6 @@ def main(args):
     torch.no_grad()
 
     # 6. run coreference
-    entity = 0
     for test_graph, test_mentions in graph_loader:
         gvec = net(test_graph)
 
@@ -168,11 +169,7 @@ def main(args):
         sent_index = test_graph.ndata['sent_index'][mention_idxs]
         token_index = test_graph.ndata['token_index'][mention_idxs]
         for s, t, m in zip(sent_index, token_index, system_clusters):
-            if m:
-                dataset[s][t].COREF = int(m)
-                entity += 1
-            else:
-                dataset[s][t].COREF = '_'
+            dataset[s][t].COREF = '{:d}'.format(int(m))
 
         if args.score:
             # score the clustering

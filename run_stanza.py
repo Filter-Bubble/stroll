@@ -74,13 +74,15 @@ def dataset_from_text_files(names=None, dataset=None):
 
                 sentence = Sentence()
                 for t in parsed[0]:
+                    if 'feats' not in t:
+                        t['feats'] = '_'
                     token = Token([
                       t['id'],  # ID
                       t['text'],  # FORM
                       t['lemma'],  # LEMMA
                       t['upos'],  # UPOS
                       t['xpos'],  # XPOS
-                      '_',  # t['ufeats'],  # FEATS
+                      t['feats'],  # FEATS
                       '{}'.format(t['head']),  # HEAD
                       t['deprel'],  # DEPREL
                       '_',  # DEPS
