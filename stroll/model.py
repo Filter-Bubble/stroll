@@ -485,17 +485,8 @@ class EntityNet(nn.Module):
                 h_layers=1,
                 batchnorm=False)
 
-        # MAX_CANDIDATES * 51 -> MAX_CANDIDATES
-        self.combine_evidence = MLP(
-                self.max_candidates * 51,
-                self.max_candidates,
-                pyramid=True, batchnorm=False)
-
-        # MAX_CANDIDATES+1 -> MAX_CANDIDATES+1
-        self.pick_action = MLP(
-                self.max_candidates + 1,
-                self.max_candidates + 1,
-                pyramid=True, batchnorm=False)
+        # 24 -> 1
+        self.combine_evidence = MLP(24, 1, pyramid=False, batchnorm=False)
 
         # self.default_compatability = torch.nn.Parameter(
         #         torch.tensor(0.1)

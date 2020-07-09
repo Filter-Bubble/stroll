@@ -394,7 +394,7 @@ def transform_coordinations(sentence):
             '',  # FORM
             '',  # LEMMA
             '_',  # UPOS
-            '_',  # XPOS
+            'mv',  # XPOS
             'Number=Plur',  # FEATS
             tokenA.HEAD,
             tokenA.DEPREL,

@@ -53,6 +53,8 @@ class Mention():
       end       The ID of the last token of the mention
       ids       List of Token.ID of all tokens part of the mention
       anaphore  If the mention is an anaphore (1.0) or not (0.0)
+      mwt       The set of token.FORM.lower() of a possible multi word token
+      mods      The set of token.FORM.lower() of descendant amod and nmod
 
       NOTE: The span corresponding to this mention is derived from
       the head, but processing has been done to remove syntax words.
@@ -80,13 +82,19 @@ class Mention():
             self.ids = ids
         else:
             self.ids = []
+        if self.head and self.sentence:
+            self.mwt = get_multi_word_token(sentence, self.head)
+            self.modifiers = get_modifiers_for_token(sentence, self.head)
+        else:
+            self.mwt = None
+            self.modifiers = None
 
     def __repr__(self):
         p = ""
         p += '# sent_id:   {}\n'.format(self.sentence.sent_id)
         p += '# full_text: {}\n'.format(self.sentence.full_text)
         p += 'refid= {}\n'.format(self.refid)
-        p += 'head=  {}\n'.format(self.head)
+        p += 'head=  {} {}\n'.format(self.head, self.sentence[self.head].FORM)
         p += 'span=  {}-{}\n'.format(self.start, self.end)
         p += 'text= {}\n'.format([self.sentence[i].FORM for i in self.ids])
         return p
@@ -100,6 +108,18 @@ class Mention():
         elif token.UPOS == 'PRON':
             return 'PRONOMIAL'
         elif token.UPOS == 'PROPN':
+            return 'PROPER'
+        elif token.UPOS == 'X':
+            # 'Foreign=Yes'
+            # NOTE: We cant really separate foreign language quotes and nouns
+            # from proper nouns.
+            # If we treat them as nouns, I dont expect the word vectors to
+            # be useful. If we assume they are proper nouns, we'll be doing
+            # exact string matches which make sense even for foreign words.
+
+            # 'Abbr=Yes'
+            # NOTE: This token is the head of a mention, and abbreviations are
+            # probably proper nouns. 'etc.' and 'o.a.' would not be the head.
             return 'PROPER'
 
         return 'NOMINAL'
@@ -129,59 +149,44 @@ class Mention():
         return 0.0
 
 
+def get_multi_word_token(sentence, start_id):
+    """
+    Return the set of all token.FORM.lower() that are directly descendant
+    from the start token.
+    """
+    start = sentence[start_id]
+    mwt = set([clean_token(start.FORM)])
+
+    for token in sentence:
+        if token.HEAD == start.ID and token.DEPREL in \
+                ['flat', 'fixed', 'compound:prt']:
+            mwt.add(clean_token(token.FORM))
+    return mwt
+
+
+def get_modifiers_for_token(sentence, start_id):
+    """
+    Return the set of modifiers (token.FORM.lower()) that directly attach
+    to the start token and have DEPREL 'nmod' or 'amod'.
+    """
+    start = sentence[start_id]
+    mods = set()
+
+    for token in sentence:
+        if token.HEAD == start.ID and token.DEPREL in ['nmod', 'amod']:
+            mods.add(clean_token(token.FORM))
+    return mods
+
+
 def mentions_heads_agree(mentionA, mentionB):
     """The (uncased) head.FORM of the mentions match"""
 
-    # single token mentions, just compare them
-    if len(mentionA.ids) == 1 and len(mentionB.ids) == 1:
-        headA = mentionA.sentence[mentionA.head].FORM.lower()
-        headB = mentionB.sentence[mentionB.head].FORM.lower()
-
-        if headA == headB:
-            return 1.0
-        return 0
-
-    # multi-token: there can be multi-word-expresions to deal with
-    # we only resolve the 'flat' deprel: 'John <-flat- Johnson'
-    # and match when metionA is contained in B or B in A.
-
-    # build the multi word string for mention A
-    headA_contents = []
-    sentA = mentionA.sentence
-
-    headA_contents.append(sentA[mentionA.head].FORM.lower())
-    idx = sentA.index(mentionA.head) + 1
-    while idx < len(sentA):
-        if sentA[idx].DEPREL == 'flat':
-            headA_contents.append(sentA[idx].FORM.lower())
-            idx = idx + 1
-        else:
-            break
-
-    # build the multi word string for mention B
-    headB_contents = []
-    sentB = mentionB.sentence
-
-    headB_contents.append(sentB[mentionB.head].FORM.lower())
-    idx = sentB.index(mentionB.head) + 1
-    while idx < len(sentB):
-        if sentB[idx].DEPREL == 'flat':
-            headB_contents.append(sentB[idx].FORM.lower())
-            idx = idx + 1
-        else:
-            break
-
-    # All tokens from the shortest one should be in the largest
-    if len(headA_contents) < len(headB_contents):
-        for form in headA_contents:
-            if form not in headB_contents:
-                return 0.0
+    # All tokens from the shorter one should be in the larger
+    if mentionA.mwt.issubset(mentionB.mwt) or \
+       mentionB.mwt.issubset(mentionA.mwt):
         return 1.0
     else:
-        for form in headB_contents:
-            if form not in headA_contents:
-                return 0.0
-    return 1.0
+        return 0.0
 
 
 def mentions_match_exactly(mentionA, mentionB):
@@ -192,8 +197,8 @@ def mentions_match_exactly(mentionA, mentionB):
     sentA = mentionA.sentence
     sentB = mentionB.sentence
     for i in range(len(mentionA.ids)):
-        formA = sentA[mentionA.ids[i]].FORM
-        formB = sentB[mentionB.ids[i]].FORM
+        formA = clean_token(sentA[mentionA.ids[i]].FORM)
+        formB = clean_token(sentB[mentionB.ids[i]].FORM)
         if formA.lower() != formB.lower():
             return 0.0
 
@@ -213,13 +218,13 @@ def mentions_match_relaxed(mentionA, mentionB):
     for id in mentionA.ids:
         token = sentA[id]
         if token.UPOS in ['PROPN', 'NOUN']:
-            contentA.append(token.FORM.lower())
+            contentA.append(clean_token(token.FORM))
 
     contentB = []
     for id in mentionB.ids:
         token = sentB[id]
         if token.UPOS in ['PROPN', 'NOUN']:
-            contentB.append(token.FORM.lower())
+            contentB.append(clean_token(token.FORM))
 
     if len(contentA) == 0 or len(contentB) == 0:
         return 0.0
@@ -252,6 +257,11 @@ def mentions_overlap(mentionA, mentionB):
         return 1.0
 
     return 0.0
+
+
+@lru_cache(maxsize=500)
+def clean_token(text):
+    return re.sub('[^\w]+', '', text).lower()
 
 
 @lru_cache(maxsize=500)
