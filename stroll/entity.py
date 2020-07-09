@@ -160,12 +160,24 @@ def quantized_distance_top_to_mention(entity, mention):
     """
     # Distance form the entity
     # assume the mentions are from the same document
-    top = entity.mentions[-1]
-    distance = abs(mention.sentence.sent_rank - top.sentence.sent_rank)
-    if distance > 3:
-        return torch.tensor([0.0])
+    top1 = entity.mentions[-1]
+    distance1 = abs(mention.sentence.sent_rank - top1.sentence.sent_rank)
+    if distance1 > 3:
+        distance1 = torch.tensor([0.0])
     else:
-        return torch.tensor([(3.0 - distance)/3])
+        distance1 = torch.tensor([(3.0 - distance1)/3])
+
+    if len(entity.mentions) > 1:
+        top2 = entity.mentions[-2]
+        distance2 = abs(mention.sentence.sent_rank - top2.sentence.sent_rank)
+        if distance2 > 3:
+            distance2 = torch.tensor([0.0])
+        else:
+            distance2 = torch.tensor([(3.0 - distance2)/3])
+    else:
+        distance2 = torch.zeros_like(distance1)
+
+    return torch.cat([distance1, distance2])
 
 
 def semantic_role_similiarty_top_to_mention(entity, mention):
@@ -175,11 +187,20 @@ def semantic_role_similiarty_top_to_mention(entity, mention):
     dim = 1
     """
     # Similar semantic role
-    top = entity.mentions[-1]
-    key = to_one_hot(deprel_codec, top.sentence[top.head].DEPREL)
+    top1 = entity.mentions[-1]
+    key1 = to_one_hot(deprel_codec, top1.sentence[top1.head].DEPREL)
+    if len(entity.mentions) > 1:
+        top2 = entity.mentions[-2]
+        key2 = to_one_hot(deprel_codec, top2.sentence[top2.head].DEPREL)
+    else:
+        key2 = torch.zeros_like(key1)
+
     query = to_one_hot(deprel_codec, mention.sentence[mention.head].DEPREL)
 
-    return torch.sum(query * key, dim=0, keepdim=True)
+    return torch.cat([
+            torch.sum(query * key1, dim=0, keepdim=True),
+            torch.sum(query * key2, dim=0, keepdim=True)
+            ])
 
 
 def wordvector_similarity_entity_to_mention(entity, mention):
@@ -332,8 +353,16 @@ def precise_construct_mention_mention(ma, mb):
 
 
 def precise_constructs_top_to_mention(entity, mention):
-    top = entity.mentions[-1]
-    return precise_construct_mention_mention(top, mention)
+    top1 = entity.mentions[-1]
+    pc1 = precise_construct_mention_mention(top1, mention)
+
+    if len(entity.mentions) > 1:
+        top2 = entity.mentions[-2]
+        pc2 = precise_construct_mention_mention(top2, mention)
+    else:
+        pc2 = torch.zeros_like(pc1)
+
+    return torch.cat([pc1, pc2])
 
 
 def features_for_mention(mention):
@@ -410,18 +439,18 @@ def action_add_probabilities(net, entities=[], mention=None):
             #  * 4 mention type
             to_one_hot(mention_type_codec, mention.type()),
 
-            #  * 1 semantic_role_similiarty_top_to_mention
+            #  * 2 semantic_role_similiarty_top_to_mention
             semantic_role_similiarty_top_to_mention(entity, mention),
 
-            #  * 1 quantized_distance_top_to_mention
+            #  * 2 quantized_distance_top_to_mention
             quantized_distance_top_to_mention(entity, mention),
 
-            # * 3 precise_constructs_top_to_mention
+            # * 6 precise_constructs_top_to_mention
             precise_constructs_top_to_mention(entity, mention)
             ]))
 
     while len(input) < MAX_CANDIDATES:
-        input.append(torch.zeros(46))
+        input.append(torch.zeros(51))
 
     # pass through network MAX_CANDIDATES * 51 -> MAX_CANDIDATES
     input = torch.cat(input)

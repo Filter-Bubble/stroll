@@ -1,5 +1,3 @@
-import sys
-import signal
 import argparse
 import logging
 
@@ -24,11 +22,6 @@ from stroll.entity import set_wordvector
 # Global arguments for dealing with Ctrl-C
 global writer
 writer = None
-
-global log_oracle
-log_oracle = np.zeros(MAX_CANDIDATES + 1)
-global log_action
-log_action = np.zeros(MAX_CANDIDATES + 1)
 
 parser = argparse.ArgumentParser(
         description='Train an entity centric transition based coreference net'
@@ -100,17 +93,14 @@ def oracle_losses(entities=[], mention=None):
 
 
 def train_one(net, entities=[], mention=None, dynamic_oracle=False):
-    global log_action
-    global log_oracle
     net.train()
 
     # short cut for single action
-    # this prevents blowing up the new_entity_prob in the backward pass
     if len(entities) == 0:
         new_entity = Entity()
         new_entity.add(mention)
         entities.append(new_entity)
-        loss = torch.zeros(1, requires_grad=True)
+        loss = torch.tensor([float('nan')])
         return loss
 
     # sort entities by distance
@@ -127,24 +117,17 @@ def train_one(net, entities=[], mention=None, dynamic_oracle=False):
     candidates = [rank[0] for rank in ranking]
 
     # score the most likely action as predicted by our network
-    # MAX_CANDIDATES+1 -> MAX_CANDIDATES+1
-    picked = torch.cat([
+    all_probs = torch.cat([
         action_new_probability(net, entities, mention),
         action_add_probabilities(net, candidates, mention)
         ])
-    all_probs = net.pick_action(picked)
-
-    # drop entries for non-existant entities
-    all_probs = all_probs[0:len(candidates) + 1]
 
     # pick the most likely action for a dynamic oracle
     dynamic_action = all_probs.argmax().item()
-    log_action[dynamic_action] += 1.0
 
     # ask the oracle for costs
     costs = oracle_losses(candidates, mention)
     oracle_action = costs.argmin().item()
-    log_oracle[oracle_action] += 1.0
 
     # hingeloss
     # all_probs = torch.softmax(all_probs, dim=0)
@@ -191,6 +174,13 @@ def eval(net, doc):
 
     # add the mentions one-by-one to the entities
     for mention in doc:
+        # short cut for single action
+        if len(entities) == 0:
+            new_entity = Entity()
+            new_entity.rank = len(entities)
+            new_entity.add(mention)
+            entities.append(new_entity)
+            continue
 
         # sort entities by distance
         ranking = []
@@ -200,20 +190,16 @@ def eval(net, doc):
             ranking.append([entity, rank])
         ranking.sort(key=lambda k: -k[1])
 
-        # take top N=10 entities
+        # take top N entities
         if len(ranking) > MAX_CANDIDATES:
             ranking = ranking[0:MAX_CANDIDATES]
         candidates = [rank[0] for rank in ranking]
 
         # score the most likely action as predicted by our network
-        # MAX_CANDIDATES+1 -> MAX_CANDIDATES+1
-        picked = torch.cat([
+        all_probs = torch.cat([
             action_new_probability(net, entities, mention),
             action_add_probabilities(net, candidates, mention)
             ])
-        all_probs = net.pick_action(picked)
-
-        all_probs = all_probs[0:len(candidates) + 1]
         action = all_probs.argmax().item()
 
         if action == 0:
@@ -274,21 +260,25 @@ def train(net, test_docs, train_docs,
             entities = []
 
             # add the mentions one-by-one to the entities
-            total_loss = 0
+            total_loss = torch.zeros(1)
             for mention in doc:
-                total_loss += train_one(
-                        net, entities, mention
-                        )
+                loss = train_one(net, entities, mention)
+                if loss.requires_grad and not torch.isnan(loss):
+                    total_loss += loss
 
             args.word_count += 1
 
-            if total_loss.requires_grad:
+            if total_loss.requires_grad and \
+                    not torch.any(torch.isnan(total_loss)):
                 total_loss = total_loss / len(doc)
                 optimizer.zero_grad()
                 total_loss.backward()
 
                 # update parameters
                 optimizer.step()
+            else:
+                logging.warning('Loss is NaN or does not requires gradient')
+                optimizer.zero_grad()
 
             writer.add_scalar(
                     'total_loss',
@@ -324,19 +314,17 @@ def train(net, test_docs, train_docs,
                 score_b3 /= len(test_docs)
                 score_ce /= len(test_docs)
 
-                writer.add_scalar('muc_p', score_muc[0], args.word_count)
-                writer.add_scalar('muc_r', score_muc[1], args.word_count)
+                writer.add_scalar('muc_r', score_muc[0], args.word_count)
+                writer.add_scalar('muc_p', score_muc[1], args.word_count)
                 writer.add_scalar('muc_f', score_muc[2], args.word_count)
 
-                writer.add_scalar('b3_p', score_b3[0], args.word_count)
-                writer.add_scalar('b3_r', score_b3[1], args.word_count)
+                writer.add_scalar('b3_r', score_b3[0], args.word_count)
+                writer.add_scalar('b3_p', score_b3[1], args.word_count)
                 writer.add_scalar('b3_f', score_b3[2], args.word_count)
 
-                writer.add_scalar('ce_p', score_ce[0], args.word_count)
-                writer.add_scalar('ce_r', score_ce[1], args.word_count)
+                writer.add_scalar('ce_r', score_ce[0], args.word_count)
+                writer.add_scalar('ce_p', score_ce[1], args.word_count)
                 writer.add_scalar('ce_f', score_ce[2], args.word_count)
-                print('Network:', log_action / np.sum(log_action))
-                print('Oracle:', log_oracle / np.sum(log_oracle))
 
                 writer.add_scalar('conll',
                                   (score_muc[2] + score_b3[2] + score_ce[2])/3,
@@ -354,7 +342,7 @@ def main(args):
     logging.basicConfig(level=logging.INFO)
 
     exp_name = 'entity' + \
-        '_v0.34_stat'.format(MAX_CANDIDATES)
+        '_v0.48_{}_stat_manfeats_nopy'.format(MAX_CANDIDATES)
 
     args.exp_name = exp_name
     print('Experiment {}'.format(args.exp_name))
@@ -403,19 +391,7 @@ def main(args):
     print('Tensorboard output in "{}".'.format(exp_name))
     writer = SummaryWriter('runs_entity/' + exp_name)
 
-    print('Ctrl-c will abort training and save the current model.')
-
-    def sigterm_handler(_signo, _stack_frame):
-        global writer
-
-        writer.close()
-        print('Ctrl-c detected, aborting')
-        exit(0)
-
-    # signal.signal(signal.SIGTERM, sigterm_handler)
-    # signal.signal(signal.SIGINT, sigterm_handler)
-
-    net = EntityNet(max_candidates=MAX_CANDIDATES)
+    net = EntityNet()
 
     print('Looking for "restart.pt".')
     try:
@@ -428,6 +404,7 @@ def main(args):
             lr=args.learning_rate,
             )
         optimizer.load_state_dict(restart['optimizer'])
+
     except(FileNotFoundError):
         logging.info('Restart failed, starting from scratch.')
         args.word_count = 0

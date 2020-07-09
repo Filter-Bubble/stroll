@@ -485,9 +485,9 @@ class EntityNet(nn.Module):
                 h_layers=1,
                 batchnorm=False)
 
-        # MAX_CANDIDATES * 46 -> MAX_CANDIDATES
+        # MAX_CANDIDATES * 51 -> MAX_CANDIDATES
         self.combine_evidence = MLP(
-                self.max_candidates * 46,
+                self.max_candidates * 51,
                 self.max_candidates,
                 pyramid=True, batchnorm=False)
 

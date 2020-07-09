@@ -225,10 +225,12 @@ runs_mentions/ADAMv3.32_1e-03_150b_HL_64d_2lUPOS_FEATS_DEPREL_WVEC_FT50/model_03
 runs_coref/ADAMv4.11_1e-03_50b_HL_100d_2l_WVEC_DEPREL_FT50/model_005840868.pt
 
 # best entity:
+runs_entity/entity_v0.34_stat/model_000011550.pt
 
 # try it:
 python3 run_stanza.py --output jenj.conll jip_en_janneke.txt
 python3 postprocess_srl.py --output jenj_srl.conll jenj.conll
 python3 run_mentions.py --output jenj_mentions.conll jenj_srl.conll
-python3 run_coref.py --html jenj.html --output jenj_all.conll jenj_mentions.conll
-google-chrome jenj.html
+python3 run_coref.py --html coref.html --output jenj_coref.conll jenj_mentions.conll
+python3 run_entity.py --html entity.html --output jenj_entity.conll jenj_mentions.conll
+google-chrome coref.html entity.html
