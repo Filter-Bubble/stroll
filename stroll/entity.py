@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 from stroll.labels import to_one_hot
-from stroll.labels import feats_codec, deprel_codec, mention_type_codec
+from stroll.labels import mention_type_codec
 from stroll.coref import get_multi_word_token
 from stroll.coref import clean_token
 
@@ -188,8 +188,8 @@ def comp_wv(wa, wb):
     """
     Dot product between normalized vectors
     """
-    wan = wa / (np.dot(wa, wa)**0.5)
-    wbn = wb / (np.dot(wb, wb)**0.5)
+    wan = wa / (np.dot(wa, wa)**0.5 + 1e-8)
+    wbn = wb / (np.dot(wb, wb)**0.5 + 1e-8)
     return np.dot(wan, wbn)
 
 
@@ -272,8 +272,12 @@ def precise_constructs_top_to_mention(entity, mention):
     #                    in the Waitan district])
     top = entity.mentions[-1]
 
+    ap = 0.0  # appositive
+    pn = 0.0  # predicate nominative
+    sc = 0.0  # part of same conjunction
+
     if top.sentence != mention.sentence:
-        return torch.zeros(3)
+        return torch.tensor([ap, pn, sc])
 
     sentence = top.sentence
 
@@ -284,10 +288,6 @@ def precise_constructs_top_to_mention(entity, mention):
     bid = sentence[mention.head].ID
     bdr = sentence[mention.head].DEPREL
     bhd = sentence[mention.head].HEAD
-
-    ap = 0.0  # appositive
-    pn = 0.0  # predicate nominative
-    sc = 0.0  # part of same conjunction
 
     if ahd == bhd:
         if adr == 'cop' or bdr == 'cop':
@@ -418,12 +418,20 @@ def action_new_probability(net, entities, mention):
     # Length of the mention : 1
     mlength = len(mention.ids)
 
+    # how far at the front of the sentence is the mention : 1
+    ff = 1.0 - sentence.index(mention.ids[0]) / (len(sentence) * 1.0)
+
+    # how far to the back of the sentence is the mention : 1
+    bb = sentence.index(mention.ids[-1]) / (len(sentence) * 1.0)
+
     query = torch.cat([
         torch.tensor([
             mentions_to_entities_ratio,
             norm_location,
             ncandidates,
-            mlength]),
+            mlength,
+            ff,
+            bb]),
         mtype
         ])
 
@@ -463,7 +471,7 @@ def action_add_probabilities(net, entities=[], mention=None):
             #  * 1 quantized_distance_top_to_mention
             quantized_distance_top_to_mention(entity, mention),
 
-            # * 3 precise_constructs_top_to_mention
+            #  * 3 precise_constructs_top_to_mention
             precise_constructs_top_to_mention(entity, mention)
             ])
         )

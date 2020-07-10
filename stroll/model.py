@@ -61,6 +61,7 @@ class MLP(nn.Module):
             h_layers=2,
             batchnorm=True,
             pyramid=False,
+            bias=True
             ):
         super(MLP, self).__init__()
         self.in_feats = in_feats
@@ -85,7 +86,8 @@ class MLP(nn.Module):
 
         layers = []
         for i in range(self.h_layers-1):
-            layer = nn.Linear(dims_remaining, dims_remaining - delta_dims)
+            layer = nn.Linear(dims_remaining, dims_remaining - delta_dims,
+                              bias=bias)
             dims_remaining -= delta_dims
             nn.init.kaiming_uniform_(
                     layer.weight,
@@ -107,7 +109,7 @@ class MLP(nn.Module):
                 sys.exit(-1)
             layers.append(layer)
 
-        layer = nn.Linear(dims_remaining, self.out_feats)
+        layer = nn.Linear(dims_remaining, self.out_feats, bias=bias)
         nn.init.kaiming_uniform_(
                 layer.weight,
                 mode='fan_in',
@@ -480,13 +482,16 @@ class EntityNet(nn.Module):
         self.max_candidates = max_candidates
 
         self.new_entity_prob = MLP(
-                8,
+                10,
                 1,
-                h_layers=1,
-                batchnorm=False)
+                h_layers=2,
+                batchnorm=False,
+                pyramid=False,
+                bias=False)
 
         # 24 -> 1
-        self.combine_evidence = MLP(24, 1, pyramid=False, batchnorm=False)
+        self.combine_evidence = MLP(24, 1, pyramid=False, batchnorm=False,
+                                    bias=True)
 
         # self.default_compatability = torch.nn.Parameter(
         #         torch.tensor(0.1)
