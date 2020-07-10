@@ -4,11 +4,14 @@ import logging
 import torch
 import dgl
 
+from sklearn.metrics import precision_recall_fscore_support as PRF
+
 from torch.utils.data import DataLoader
 
 from stroll.conllu import ConlluDataset
 from stroll.graph import GraphDataset
 from stroll.coref import preprocess_sentence, postprocess_sentence
+from stroll.coref import get_mentions
 
 from stroll.model import MentionNet
 from stroll.labels import FasttextEncoder
@@ -30,6 +33,18 @@ parser.add_argument(
 parser.add_argument(
         '--mmax',
         help='Output file in MMAX format',
+        )
+parser.add_argument(
+        '--score',
+        help='Score using gold annotation from the input',
+        default=False,
+        action='store_true'
+        )
+parser.add_argument(
+        '--verbose',
+        help='Print gold and found mentions',
+        default=False,
+        action='store_true'
         )
 parser.add_argument(
         '--output',
@@ -92,9 +107,29 @@ if __name__ == '__main__':
     dataset = ConlluDataset(args.input)
 
     # 3. pre-process the dependency tree to unfold coordination
-    #   and convert the gold span based mentions to head-based mentions
+    #    and convert the gold span based mentions to head-based mentions
+    gold_braket = []
+    gold_head = []
+
+    refid_lookup = []  # by sent_index
     for sentence in dataset:
-        preprocess_sentence(sentence)
+        braket, head = preprocess_sentence(sentence)
+        gold_braket += braket
+        gold_head += head
+
+        head_by_token_index = {}
+        for mention in gold_head:
+            sentence = mention.sentence
+            index = sentence.index(mention.head)
+            head_by_token_index[index] = mention.refid
+        refid_lookup.append(head_by_token_index)
+
+    if args.verbose and args.score:
+        print('Number of mentions (braket): {}'.format(len(gold_braket)))
+        print('Number of mentions (head):   {}'.format(len(gold_head)))
+        for mention in gold_head:
+            print(mention)
+            print('----')
 
     # 4. make graphs from the conll dataset
     graphset = GraphDataset(
@@ -105,7 +140,7 @@ if __name__ == '__main__':
     graph_loader = DataLoader(
         graphset,
         num_workers=2,
-        batch_size=500,
+        batch_size=len(graphset),
         collate_fn=dgl.batch
         )
 
@@ -121,28 +156,60 @@ if __name__ == '__main__':
     net.eval()
 
     # 6. score mentions
-    entity = 0
+    entity = 1000
     for g in graph_loader:
         xa = net(g)
+
+        # system mentions
         _, system = torch.max(xa, dim=1)
 
         # save mentions in the dataset
-        sent_index = g.ndata['sent_index']
-        token_index = g.ndata['token_index']
-        for s, t, m in zip(sent_index, token_index, system):
-            if m:
-                # treat every mention as a new entity
-                dataset[s][t].COREF = entity
-                entity += 1
+        sent_indices = g.ndata['sent_index'].tolist()
+        token_indices = g.ndata['token_index'].tolist()
+        for sent_index, token_index, isMention in \
+                zip(sent_indices, token_indices, system):
+            if isMention:
+                if token_index in refid_lookup[sent_index]:
+                    dataset[sent_index][token_index].COREF = \
+                            refid_lookup[sent_index][token_index]
+                else:
+                    # treat every mention as a new entity
+                    dataset[sent_index][token_index].COREF = \
+                            '{}'.format(entity)
+                    entity += 1
             else:
-                dataset[s][t].COREF = '_'
+                dataset[sent_index][token_index].COREF = '_'
 
-    # 3. convert head-based mentions to span-based mentions
-    for sentence in dataset:
-        postprocess_sentence(sentence)
+        if args.score:
+            # correct mentions:
+            target = g.ndata['coref'].view(-1).clamp(0, 1)
 
-    if args.mmax:
-        write_output_mmax(dataset, args.output)
+            # score
+            score_id_p, score_id_r, score_id_f1, support = PRF(
+                target, system, labels=[1]
+                )
+
+            print('P: {}'.format(score_id_p[0]))
+            print('R: {}'.format(score_id_r[0]))
+            print('F: {}'.format(score_id_f1[0]))
+            print('support: {}'.format(support))
+            print('Failed look up refid for {} mentions'.format(entity - 1000))
+
+    if args.verbose:
+        print('Found mentions:')
+        for sentence in dataset:
+            mentions = get_mentions(sentence)
+            for mention in mentions:
+                print(mention)
+                print('----')
+
+    # 3. Output: head based to conll
     if args.output:
         with open(args.output, 'w') as f:
             f.write(dataset.__repr__())
+
+    # 4. Output: span based mmax
+    if args.mmax:
+        for sentence in dataset:
+            postprocess_sentence(sentence)
+        write_output_mmax(dataset, args.output)

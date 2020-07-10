@@ -10,13 +10,14 @@ from scorch.scores import muc, b_cubed, ceaf_e
 
 from stroll.conllu import ConlluDataset
 from stroll.coref import preprocess_sentence, postprocess_sentence
+from stroll.coref import get_mentions
 
 from stroll.model import EntityNet
 from stroll.entity import Entity
 from stroll.entity import action_new_probability, action_add_probabilities
 from stroll.entity import set_wordvector
 
-MAX_CANDIDATES = 20
+MAX_CANDIDATES = 50
 
 parser = argparse.ArgumentParser(
         description='Run an entity centric trainsition based  coreference net'
@@ -45,6 +46,18 @@ parser.add_argument(
         action='store_true'
         )
 parser.add_argument(
+        '--verbose',
+        help='Print candidate entities and probiblities during run',
+        default=False,
+        action='store_true'
+        )
+parser.add_argument(
+        '--preprocess',
+        help='Apply preprocessing step (only necessary for gold files)',
+        default=False,
+        action='store_true'
+        )
+parser.add_argument(
         '--output',
         help='Output file in conllu format',
         )
@@ -68,7 +81,8 @@ def write_html(dataset, name):
                     }
         for token in sentence:
             if token.COREF != '_':
-                entities[token.COREF] = 1
+                for ref in token.COREF.split('|'):
+                    entities[ref.replace('(', '').replace(')', '')] = 1
 
     with open(name, 'w') as f:
         f.write(template.render(
@@ -118,13 +132,19 @@ def write_output_mmax(dataset, filename):
 
 def eval(net, doc):
     net.eval()
-    trace = ''
 
     # start without entities
     entities = []
 
     # add the mentions one-by-one to the entities
     for mention in doc:
+        # short cut for single action
+        if len(entities) == 0:
+            new_entity = Entity()
+            new_entity.refid = len(entities)
+            new_entity.add(mention)
+            entities.append(new_entity)
+            continue
 
         # sort entities by distance
         ranking = []
@@ -134,35 +154,45 @@ def eval(net, doc):
             ranking.append([entity, rank])
         ranking.sort(key=lambda k: -k[1])
 
-        # take top N=10 entities
+        # take top N entities
         if len(ranking) > MAX_CANDIDATES:
             ranking = ranking[0:MAX_CANDIDATES]
         candidates = [rank[0] for rank in ranking]
 
         # score the most likely action as predicted by our network
         # MAX_CANDIDATES+1 -> MAX_CANDIDATES+1
-        picked = torch.cat([
+        all_probs = torch.cat([
             action_new_probability(net, entities, mention),
             action_add_probabilities(net, candidates, mention)
             ])
-        all_probs = net.pick_action(picked)
-
-        all_probs = all_probs[0:len(candidates) + 1]
         action = all_probs.argmax().item()
+
+        if args.verbose:
+            print('----------==', mention.sentence[mention.head].FORM,
+                  'mwt: ', ', '.join(list(mention.mwt)))
+            print('0 New', all_probs[0].item())
+            for c in range(len(candidates)):
+                cand = candidates[c]
+                print(
+                        c+1, 'Add',
+                        cand.refid,
+                        'Nouns: ' + ' '.join(list(cand.nouns)),
+                        'Proper Nouns: ' + ' '.join(list(cand.proper_nouns)),
+                        'Pronouns: ' + ' '.join(list(cand.pronouns)),
+                        all_probs[c+1].item()
+                        )
+            print('-.-.-.-.-.-.-', action)
 
         if action == 0:
             # start a new entity
             new_entity = Entity()
             new_entity.add(mention)
-            new_entity.rank = len(entities)
+            new_entity.refid = len(entities)
             entities.append(new_entity)
-            trace += ' {} '.format(new_entity.rank)
         else:
             # add to existing entity
             existing_entity = candidates[action - 1]
             existing_entity.add(mention)
-            trace += ' {}L'.format(existing_entity.rank)
-    logging.info(trace)
 
     # score the entities
     # build list of sets for both gold and system
@@ -183,9 +213,15 @@ def eval(net, doc):
 
     # write results back to entities and dataset
     for refid, entity in enumerate(entities):
+        if args.verbose:
+            print(entity)
         for mention in entity.mentions:
+            if args.verbose:
+                print(mention)
             mention.refid = refid
             mention.sentence[mention.head].COREF = '{}'.format(refid)
+        if args.verbose:
+            print('= - = - = - = - = - = - =')
 
     return score_muc, score_b3, score_ce
 
@@ -209,9 +245,17 @@ if __name__ == '__main__':
     # 3. pre-process the dependency tree to unfold coordination
     #    and group the mentions per document
     eval_mentions = []
-    for sentence in dataset:
-        _, mentions = preprocess_sentence(sentence)
-        eval_mentions += mentions
+
+    if args.preprocess:
+        for sentence in dataset:
+            _, mentions = preprocess_sentence(sentence)
+            eval_mentions += mentions
+    else:
+        for sentence in dataset:
+            eval_mentions += get_mentions(sentence)
+
+    if args.score:
+        print('Number of mentions: {}'.format(len(eval_mentions)))
 
     eval_docs = [[] for i in dataset.doc_lengths]
     for mention in eval_mentions:
@@ -220,7 +264,7 @@ if __name__ == '__main__':
         eval_docs[doc_rank].append(mention)
 
     # 5. initialize the network
-    net = EntityNet(max_candidates=MAX_CANDIDATES)
+    net = EntityNet()
     net.load_state_dict(state_dict, strict=False)
 
     # 6. score mentions
@@ -234,15 +278,15 @@ if __name__ == '__main__':
                     (score_muc[2] + score_b3[2] + score_ce[2]) / 3.
                     ]))
 
-    if args.mmax:
-        write_output_mmax(dataset, args.output)
-    if args.html:
-        write_html(dataset, args.html)
+    if args.output:
+        with open(args.output, 'w') as f:
+            f.write(dataset.__repr__())
 
     # 3. convert head-based mentions to span-based mentions
     for sentence in dataset:
         postprocess_sentence(sentence)
 
-    if args.output:
-        with open(args.output, 'w') as f:
-            f.write(dataset.__repr__())
+    if args.mmax:
+        write_output_mmax(dataset, args.output)
+    if args.html:
+        write_html(dataset, args.html)

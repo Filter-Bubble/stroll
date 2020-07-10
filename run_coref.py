@@ -102,8 +102,8 @@ def main(args):
 
     # 3. pre-process the dependency tree to unfold coordination
     #   and convert the gold span based mentions to head-based mentions
-    for sentence in dataset:
-        preprocess_sentence(sentence)
+    # for sentence in dataset:
+    #     preprocess_sentence(sentence)
 
     # when evaluating
     mark_gold_anaphores(dataset)
