@@ -148,12 +148,11 @@ def quantized_distance_top_to_mention(entity, mention):
         return torch.tensor([(3.0 - distance)/3])
 
 
-def semantic_role_similiarty_top_to_mention(entity, mention):
+def semantic_role_mention(mention):
     """
-    Sum of (part of the) DEPREL vectors of the top mention of the entity,
-    and the query mention.
+    (part of the) DEPREL vector of the top mention
 
-    Relation includeds:
+    Relation includes:
     nsubj, nsubj:pass, obj, iobj, obl, obl:agent
 
     dim = 6
@@ -168,20 +167,13 @@ def semantic_role_similiarty_top_to_mention(entity, mention):
             'obl:agent': torch.tensor([0., 0., 0., 0., 0., 0.5])
             }
 
-    top = entity.mentions[-1]
-    tdr = top.sentence[top.head].DEPREL
-    if tdr in RELS:
-        tdr = RELS[tdr]
-    else:
-        tdr = torch.zeros(6)
-
     mdr = mention.sentence[mention.head].DEPREL
     if mdr in RELS:
         mdr = RELS[mdr]
     else:
         mdr = torch.zeros(6)
 
-    return (tdr + mdr)
+    return mdr
 
 
 def comp_wv(wa, wb):
@@ -392,6 +384,18 @@ def features_for_mention(mention):
     return torch.tensor([masculine, feminine, neuter, singular, plural])
 
 
+def relative_position_in_sentence(mention):
+    sentence = mention.sentence
+
+    # how far at the front of the sentence is the mention : 1
+    ff = 1.0 - sentence.index(mention.ids[0]) / (len(sentence) * 1.0)
+
+    # how far to the back of the sentence is the mention : 1
+    bb = sentence.index(mention.ids[-1]) / (len(sentence) * 1.0)
+
+    return torch.tensor([ff, bb])
+
+
 def action_new_probability(net, entities, mention):
     """
     Probabilities to start a new entity.
@@ -418,21 +422,16 @@ def action_new_probability(net, entities, mention):
     # Length of the mention : 1
     mlength = len(mention.ids)
 
-    # how far at the front of the sentence is the mention : 1
-    ff = 1.0 - sentence.index(mention.ids[0]) / (len(sentence) * 1.0)
-
-    # how far to the back of the sentence is the mention : 1
-    bb = sentence.index(mention.ids[-1]) / (len(sentence) * 1.0)
-
     query = torch.cat([
         torch.tensor([
-            mentions_to_entities_ratio,
-            norm_location,
-            ncandidates,
-            mlength,
-            ff,
-            bb]),
-        mtype
+            mentions_to_entities_ratio,  # 1
+            norm_location,  # 1
+            ncandidates,  # 1
+            mlength  # 1
+            ]),
+        semantic_role_mention(mention),  # 6
+        mtype,  # 4
+        relative_position_in_sentence(mention)  # 2
         ])
 
     return net.new_entity_prob(query)
@@ -465,16 +464,21 @@ def action_add_probabilities(net, entities=[], mention=None):
             #  * 4 mention type
             to_one_hot(mention_type_codec, mention.type()),
 
-            #  * 6 semantic_role_similiarty_top_to_mention
-            semantic_role_similiarty_top_to_mention(entity, mention),
+            #  * 12 semantic_role_similiarty_top_to_mention
+            semantic_role_mention(mention),
+            semantic_role_mention(entity.mentions[-1]),
 
             #  * 1 quantized_distance_top_to_mention
             quantized_distance_top_to_mention(entity, mention),
 
             #  * 3 precise_constructs_top_to_mention
-            precise_constructs_top_to_mention(entity, mention)
+            precise_constructs_top_to_mention(entity, mention),
+
+            #  * 4 relative positions (start / end) in sentence
+            relative_position_in_sentence(mention),
+            relative_position_in_sentence(entity.mentions[-1])
             ])
         )
 
-    # pass through network 24 -> 1
+    # pass through network 34 -> 1
     return net.combine_evidence(torch.stack(input)).view(-1)
