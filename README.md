@@ -222,10 +222,32 @@ runs_srl/ADAM_1e-02_FL1.50e+00cst_50b_100d_2l_reluUPOS_FEATS_DEPREL_WVEC_FT100/m
 runs_mentions/ADAMv3.32_1e-03_150b_HL_64d_2lUPOS_FEATS_DEPREL_WVEC_FT50/model_030325091.pt
 
 # best coref:
-runs_coref/ADAMv4.11_1e-03_50b_HL_100d_2l_WVEC_DEPREL_FT50/model_005840868.pt
+On the test set:
+
+|------|------|------|---------|
+|      |  R   |   P  |  F      |
+|------|------|------|---------|
+|muc   | 47.06| 55.12| 50.08   |
+|b3    | 82.19| 86.48| 84.02   |
+|ceafe | 85.51| 81.38| 83.18   |
+|conll |      |      | 72.43   |
+|------|------|------|---------|
+
+(runs_coref/ADAMv4.11_1e-03_50b_HL_100d_2l_WVEC_DEPREL_FT50/model_005840868.pt)
 
 # best entity:
-runs_entity/entity_v0.34_stat/model_000011550.pt
+On the test set:
+
+|------|------|------|---------|
+|      |  R   |   P  |  F      |
+|------|------|------|---------|
+|muc   | 47.34| 60.30| 51.63   |
+|b3    | 82.87| 88.95| 85.47   |
+|ceafe | 86.77| 80.74| 83.36   |
+|conll |      |      | 73.49   |
+|------|------|------|---------|
+
+(runs_entity/entity_v0.52_30_stat/model_000022850.pt)
 
 # try it:
 python3 run_stanza.py --output jenj.conll jip_en_janneke.txt
