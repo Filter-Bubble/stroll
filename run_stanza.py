@@ -19,6 +19,12 @@ parser.add_argument(
         nargs='*',
         help='Input files'
         )
+parser.add_argument(
+        '--nogpu',
+        default=False,
+        action='store_true',
+        help='Disable GPU accelaration'
+        )
 
 processor_dict = {
     'mwt': 'alpino',  # needed to get FEATS from the pos processor
@@ -28,9 +34,6 @@ processor_dict = {
     'depparse': 'nl_combined',
     # 'ner': None
 }
-
-# stanza.download('nl', package='alpino')
-nlp = stanza.Pipeline('nl', processors=processor_dict, package=None)
 
 
 def dataset_from_text_files(names=None, dataset=None):
@@ -102,6 +105,10 @@ def dataset_from_text_files(names=None, dataset=None):
 
 if __name__ == '__main__':
     args = parser.parse_args()
+
+    # stanza.download('nl', package='alpino')
+    nlp = stanza.Pipeline('nl', processors=processor_dict, package=None, use_gpu=not args.nogpu)
+
     dataset = dataset_from_text_files(args.input)
     with open(args.output, 'w') as outfile:
         outfile.write(dataset.__repr__())
