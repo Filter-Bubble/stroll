@@ -9,4 +9,6 @@ progress
 argparse
 fasttext
 seaborn
+stanza
+scorch
 Jinja2
