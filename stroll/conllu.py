@@ -255,6 +255,68 @@ class ConlluDataset(Dataset):
                 first = False
         return res
 
+    def load_mmax(self, filename):
+        logging.info("Opening {}".format(filename))
+
+        with open(filename, "r") as f:
+            mmax_raw = f.readlines()
+
+        sent_rank = 1
+        full_text = []
+        sentence = Sentence()
+        doc_current_id = filename  # use the filename as default doc_id
+        for line in mmax_raw:
+
+            # remove possible trailing newline and whitespace
+            line = line.rstrip()
+
+            # #begin document (dpc-bmm-001086-nl-sen); part 000
+            if line[0:15] == '#begin document':
+                doc_current_id = line[17:]
+                try:
+                    end = doc_current_id.index(')')
+                    doc_current_id = doc_current_id[:end]
+                except ValueError:
+                    pass
+
+            # #end document
+            elif line[0:13] == '#end document':
+                doc_current_id = filename  # use the filename as default doc_id
+                sent_rank = 1
+
+            # <newline> is sentence separator
+            elif len(line) == 0:
+                if len(sentence) > 0:
+                    sentence.doc_id = doc_current_id
+                    sentence.sent_id = '{}'.format(sent_rank)
+                    sentence.full_text = ' '.join(full_text)
+                    self.add(sentence)
+                    sent_rank += 1
+
+                # start a new sentence
+                sentence = Sentence()
+                full_text = []
+
+            # dpc-bmm-001086-nl-sen   0   Deze   (261
+            else:
+                fields = line.split()
+                sentence.add(Token([
+                  '{}'.format(len(sentence) + 1),  # ID = fields[0]
+                  fields[2],  # FORM = fields[1]
+                  '',  # LEMMA = fields[2]
+                  '_',  # UPOS = fields[3]
+                  '_',  # XPOS = fields[4]
+                  '_',  # FEATS = fields[5]
+                  '_',  # HEAD = fields[6]
+                  '_',  # DEPREL = fields[7]
+                  '_',  # DEPS = fields[8]
+                  '_',  # MISC = fields[9]
+                  '_',  # FRAME = fields[10]
+                  '_',  # ROLE = fields[11]
+                  fields[3]  # COREF = fields[12]
+                ]))
+                full_text.append(fields[2])
+
     def _load(self, filename):
         logging.info("Opening {}".format(filename))
 
