@@ -14,7 +14,7 @@ parser.add_argument(
         '--output',
         help='Output filename'
         )
-parser.add_argument('-t', '--type', choices=['conll', 'mmax'], default='conll')
+parser.add_argument('-t', '--type', choices=['conll', 'conll2012'], default='conll')
 parser.add_argument(
         'input',
         help='Input files'
@@ -51,9 +51,9 @@ def write_html(dataset, name):
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    if args.type == 'mmax':
+    if args.type == 'conll2012':
         dataset = ConlluDataset()
-        dataset.load_mmax(args.input)
+        dataset.load_conll2012(args.input)
     else:
         dataset = ConlluDataset(args.input)
     write_html(dataset, args.output)

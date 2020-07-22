@@ -145,7 +145,7 @@ if __name__ == '__main__':
         nlp = stanza.Pipeline('nl', processors=processor_dict, package=None, tokenize_pretokenized=True, use_gpu=not args.nogpu)
         dataset = ConlluDataset()
         for input_file in args.input:
-            dataset.load_mmax(input_file)
+            dataset.load_conll2012(input_file)
         dataset = parse_dataset(dataset, nlp)
 
     output  = args.output if args.output is not None else args.input[0]+'_stanza.conll'

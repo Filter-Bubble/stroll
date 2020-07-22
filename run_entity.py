@@ -32,8 +32,8 @@ parser.add_argument(
         help='Trained EntityNet to use',
         )
 parser.add_argument(
-        '--mmax',
-        help='Output file in MMAX format',
+        '--conll2012',
+        help='Output file in conll2012 format',
         )
 parser.add_argument(
         '--html',
@@ -92,7 +92,7 @@ def write_html(dataset, name):
         )
 
 
-def write_output_mmax(dataset, filename):
+def write_output_conll2012(dataset, filename):
     keyfile = open(filename, 'w')
 
     firstDoc = True
@@ -286,7 +286,7 @@ if __name__ == '__main__':
     for sentence in dataset:
         postprocess_sentence(sentence)
 
-    if args.mmax:
-        write_output_mmax(dataset, args.output)
+    if args.conll2012:
+        write_output_conll2012(dataset, args.output)
     if args.html:
         write_html(dataset, args.html)

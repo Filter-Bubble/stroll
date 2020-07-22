@@ -255,17 +255,17 @@ class ConlluDataset(Dataset):
                 first = False
         return res
 
-    def load_mmax(self, filename):
+    def load_conll2012(self, filename):
         logging.info("Opening {}".format(filename))
 
         with open(filename, "r") as f:
-            mmax_raw = f.readlines()
+            conll2012_raw = f.readlines()
 
         sent_rank = 1
         full_text = []
         sentence = Sentence()
         doc_current_id = filename  # use the filename as default doc_id
-        for line in mmax_raw:
+        for line in conll2012_raw:
 
             # remove possible trailing newline and whitespace
             line = line.rstrip()
