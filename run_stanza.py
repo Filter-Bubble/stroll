@@ -27,11 +27,11 @@ parser.add_argument(
         )
 
 processor_dict = {
-    'mwt': 'alpino',  # needed to get FEATS from the pos processor
+    #'mwt': 'alpino',  # needed to get FEATS from the pos processor
     'tokenize': 'alpino',
-    'pos': 'nl_combined',
-    'lemma': 'nl_combined',
-    'depparse': 'nl_combined',
+    'pos': 'combined',
+    'lemma': 'combined',
+    'depparse': 'combined',
     # 'ner': None
 }
 
@@ -61,44 +61,45 @@ def dataset_from_text_files(names=None, dataset=None):
         sent_idx = 0
         with open(name, 'r') as infile:
             for line in infile:
-                groups = doc_and_sent_id.match(line).groups()
-                if groups[3]:
-                    doc_id = groups[1]
-                    sent_id = groups[3]
-                elif groups[1]:
-                    doc_id = name
-                    sent_id = groups[1]
-                else:
-                    doc_id = name
-                    sent_id = '{:10d}'.format(sent_idx)
+                if len(line.strip())>0:
+                    groups = doc_and_sent_id.match(line).groups()
+                    if groups[3]:
+                        doc_id = groups[1]
+                        sent_id = groups[3]
+                    elif groups[1]:
+                        doc_id = name
+                        sent_id = groups[1]
+                    else:
+                        doc_id = name
+                        sent_id = '{:10d}'.format(sent_idx)
 
-                full_text = groups[4]
-                parsed = nlp(full_text).to_dict()
+                    full_text = groups[4]
+                    parsed = nlp(full_text).to_dict()
 
-                sentence = Sentence()
-                for t in parsed[0]:
-                    if 'feats' not in t:
-                        t['feats'] = '_'
-                    token = Token([
-                      t['id'],  # ID
-                      t['text'],  # FORM
-                      t['lemma'],  # LEMMA
-                      t['upos'],  # UPOS
-                      t['xpos'],  # XPOS
-                      t['feats'],  # FEATS
-                      '{}'.format(t['head']),  # HEAD
-                      t['deprel'],  # DEPREL
-                      '_',  # DEPS
-                      '_'  # MISC
-                    ])
-                    sentence.add(token)
+                    sentence = Sentence()
+                    for t in parsed[0]:
+                        if 'feats' not in t:
+                            t['feats'] = '_'
+                        token = Token([
+                          t['id'],  # ID
+                          t['text'],  # FORM
+                          t['lemma'],  # LEMMA
+                          t['upos'],  # UPOS
+                          t['xpos'],  # XPOS
+                          t['feats'],  # FEATS
+                          '{}'.format(t['head']),  # HEAD
+                          t['deprel'],  # DEPREL
+                          '_',  # DEPS
+                          '_'  # MISC
+                        ])
+                        sentence.add(token)
 
-                sentence.full_text = full_text
-                sentence.doc_id = doc_id
-                sentence.sent_id = sent_id
-                dataset.add(sentence)
+                    sentence.full_text = full_text
+                    sentence.doc_id = doc_id
+                    sentence.sent_id = sent_id
+                    dataset.add(sentence)
 
-                sent_idx += 1
+                    sent_idx += 1
 
     return dataset
 
