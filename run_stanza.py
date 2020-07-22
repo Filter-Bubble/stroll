@@ -114,7 +114,7 @@ def dataset_from_text_files(names=None, dataset=None):
 def parse_dataset(dataset, nlp):
     """
     Parse tokenized dataset with stanza,
-    possibly overwriting the lemma, pos, dependency fields.
+    Overwriting all fields of the tokens (except FORM).
     """
     for sentence in dataset.sentences:
         tokens = [[t.FORM for t in sentence]]
@@ -127,6 +127,10 @@ def parse_dataset(dataset, nlp):
             token.FEATS = parsed_token.get('feats', '_')
             token.HEAD = '{}'.format(parsed_token['head'])
             token.DEPREL = parsed_token['deprel']
+            token.MISC = '_'
+            token.FRAME = '_'
+            token.ROLE = '_'
+            token.COREF= '_'
     return dataset
 
 if __name__ == '__main__':

@@ -11,8 +11,8 @@ from sklearn.metrics import precision_recall_fscore_support as PRF
 
 from scorch.scores import muc, b_cubed, ceaf_e
 
-from stroll.conllu import ConlluDataset
-from stroll.coref import preprocess_sentence
+from stroll.conllu import ConlluDataset, write_output_conll2012
+from stroll.coref import preprocess_sentence, postprocess_sentence
 from stroll.coref import mark_gold_anaphores
 from stroll.coref import nearest_linking
 from stroll.coref import predict_anaphores, predict_similarities
@@ -36,6 +36,10 @@ parser.add_argument(
         dest='model_name',
         default='models/coref.pt',
         help='Trained CorefNet to use',
+        )
+parser.add_argument(
+        '--conll2012',
+        help='Output file in conll2012 format',
         )
 parser.add_argument(
         '--output',
@@ -83,7 +87,6 @@ def write_html(dataset, name):
             entities=list(entities.keys())
             )
         )
-
 
 def main(args):
     logging.basicConfig(level=logging.INFO)
@@ -198,6 +201,11 @@ def main(args):
     if args.output:
         with open(args.output, 'w') as f:
             f.write(dataset.__repr__())
+
+    for sentence in dataset:
+        postprocess_sentence(sentence)
+    if args.conll2012:
+        write_output_conll2012(dataset, args.conll2012)
     if args.html:
         write_html(dataset, args.html)
 

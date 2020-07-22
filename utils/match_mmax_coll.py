@@ -103,8 +103,8 @@ def do_match(docid, doc, parsed):
         return result
 
 
-with open('mmax.conll', 'r') as f:
-    mmax = f.readlines()
+with open('conll2012.conll', 'r') as f:
+    conll2012 = f.readlines()
 
 dataset = ConlluDataset('lassy.conllu')
 
@@ -112,7 +112,7 @@ docid = None
 doc_sentences = None
 current_sentence = None
 
-for line in mmax:
+for line in conll2012:
     line = line.strip()
 
     start_match = docid_start_pattern.match(line)

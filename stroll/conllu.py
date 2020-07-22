@@ -576,3 +576,40 @@ def transform_tree(sentence):
     sentence = transform_copulas(sentence)
     sentence = transform_coordinations(sentence)
     return sentence
+
+def write_output_conll2012(dataset, filename):
+    keyfile = open(filename, 'w')
+
+    firstDoc = True
+    current_doc = None
+    for sentence in dataset:
+        if sentence.doc_id != current_doc:
+            if firstDoc:
+                firstDoc = False
+            else:
+                keyfile.write('#end document\n')
+
+            current_doc = sentence.doc_id
+            keyfile.write('#begin document ({});\n'.format(current_doc))
+        else:
+            keyfile.write('\n')
+
+        for token in sentence:
+            if token.FORM == '':
+                # these are from unfolding the coordination clauses, dont print
+                if token.COREF != '_':
+                    logging.error(
+                            'Hidden token has a coref={}'.format(token.COREF)
+                            )
+                    print(sentence)
+                    print()
+                continue
+            if token.COREF != '_':
+                coref = token.COREF
+            else:
+                coref = '-'
+            keyfile.write('{}\t0\t{}\t{}\t{}\n'.format(
+                sentence.doc_id, token.ID, token.FORM, coref))
+
+    keyfile.write('#end document\n')
+    keyfile.close()

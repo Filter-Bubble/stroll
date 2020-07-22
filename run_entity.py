@@ -8,7 +8,7 @@ from jinja2 import FileSystemLoader, Environment
 
 from scorch.scores import muc, b_cubed, ceaf_e
 
-from stroll.conllu import ConlluDataset
+from stroll.conllu import ConlluDataset, write_output_conll2012
 from stroll.coref import preprocess_sentence, postprocess_sentence
 from stroll.coref import get_mentions
 
@@ -92,42 +92,7 @@ def write_html(dataset, name):
         )
 
 
-def write_output_conll2012(dataset, filename):
-    keyfile = open(filename, 'w')
 
-    firstDoc = True
-    current_doc = None
-    for sentence in dataset:
-        if sentence.doc_id != current_doc:
-            if firstDoc:
-                firstDoc = False
-            else:
-                keyfile.write('#end document\n')
-
-            current_doc = sentence.doc_id
-            keyfile.write('#begin document ({});\n'.format(current_doc))
-        else:
-            keyfile.write('\n')
-
-        for token in sentence:
-            if token.FORM == '':
-                # these are from unfolding the coordination clauses, dont print
-                if token.COREF != '_':
-                    logging.error(
-                            'Hidden token has a coref={}'.format(token.COREF)
-                            )
-                    print(sentence)
-                    print()
-                continue
-            if token.COREF != '_':
-                coref = token.COREF
-            else:
-                coref = '-'
-            keyfile.write('{}\t0\t{}\t{}\t{}\n'.format(
-                sentence.doc_id, token.ID, token.FORM, coref))
-
-    keyfile.write('#end document\n')
-    keyfile.close()
 
 
 def eval(net, doc):
@@ -287,6 +252,6 @@ if __name__ == '__main__':
         postprocess_sentence(sentence)
 
     if args.conll2012:
-        write_output_conll2012(dataset, args.output)
+        write_output_conll2012(dataset, args.conll2012)
     if args.html:
         write_html(dataset, args.html)
