@@ -417,7 +417,7 @@ def build_mentions_from_heads(sentence, heads):
                         )
 
     # TODO: how to correctly prune non consecutive / double mentions?
-    return mentions.values()
+    return list(mentions.values())
 
 
 def get_mentions(sentence):

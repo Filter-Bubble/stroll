@@ -32,6 +32,11 @@ parser.add_argument(
         choices=['conll2012', 'conllu', 'txt'],
         default='txt'
 )
+parser.add_argument(
+        '--keep_coref',
+        action='store_true',
+        help='Retain the column for coref'
+        )
 
 processor_dict = {
     #'mwt': 'alpino',  # needed to get FEATS from the pos processor
@@ -111,7 +116,7 @@ def dataset_from_text_files(names=None, dataset=None):
     return dataset
 
 
-def parse_dataset(dataset, nlp):
+def parse_dataset(dataset, nlp, keep_coref=False):
     """
     Parse tokenized dataset with stanza,
     Overwriting all fields of the tokens (except FORM).
@@ -130,7 +135,8 @@ def parse_dataset(dataset, nlp):
             token.MISC = '_'
             token.FRAME = '_'
             token.ROLE = '_'
-            token.COREF= '_'
+            if not keep_coref:
+                token.COREF= '_'
     return dataset
 
 if __name__ == '__main__':
@@ -144,12 +150,12 @@ if __name__ == '__main__':
         dataset = ConlluDataset()
         for input_file in args.input:
             dataset._load(input_file)
-        dataset = parse_dataset(dataset, nlp)
+        dataset = parse_dataset(dataset, nlp, keep_coref=args.keep_coref)
     elif args.format == 'conll2012':
         nlp = stanza.Pipeline('nl', processors=processor_dict, package=None, tokenize_pretokenized=True, use_gpu=not args.nogpu)
         dataset = ConlluDataset()
         for input_file in args.input:
-            dataset.load_conll2012(input_file)
+            dataset.load_conll2012(input_file, keep_coref=args.keep_coref)
         dataset = parse_dataset(dataset, nlp)
 
     output  = args.output if args.output is not None else args.input[0]+'_stanza.conll'
