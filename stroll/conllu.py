@@ -6,6 +6,7 @@ from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec, \
 from .labels import to_one_hot, to_index
 from .labels import ROLES, FRAMES
 from collections import OrderedDict
+import os
 
 
 COPULA_NOUN_DESC_MOVE_TO_VERB = [
@@ -328,7 +329,7 @@ class ConlluDataset(Dataset):
         # <12 columns tab separated, 1 line per token in the sentence>
         # <empty line>
         sentence = Sentence()
-        doc_current_id = filename
+        doc_current_id = os.path.basename(filename)
         for line in conllu_raw:
 
             # remove possible trailing newline and whitespace

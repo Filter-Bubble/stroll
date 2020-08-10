@@ -5,7 +5,7 @@ echo "Processing file: $filename"
 
 
 echo "Parsing with stanza..."
-#python run_stanza.py --nogpu --keep_coref -f conllu --output ${doc}_stanza.conll ${filename}
+python run_stanza.py --nogpu --keep_coref -f conllu --output ${doc}_stanza.conll ${filename}
 
 echo "Preprocessing stanza file.."
 python conll2conll.py --preprocess -i conllu -o conllu ${doc}_stanza.conll ${doc}_stanza_prep.conll
