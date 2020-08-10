@@ -6,7 +6,7 @@ from stroll.labels import mention_type_codec
 from stroll.coref import get_multi_word_token
 from stroll.coref import clean_token
 
-MAX_CANDIDATES = 30
+MAX_CANDIDATES = 50
 
 wordvector = None
 
@@ -32,7 +32,7 @@ class Entity():
         for mention in self.mentions:
             types[mention.type()] += 1
 
-        res = 'Refid: {}'.format(self.refid)
+        res = 'Refid: {}\n'.format(self.refid)
         res += 'Length       {:4d}\n'.format(len(self.mentions))
 
         res += 'Nouns        {:4d}: '.format(types['NOMINAL'])
@@ -339,20 +339,30 @@ def features_for_mention(mention):
     PRON:  in XPOS   masc [m], fem [f], onz [n]
            in XPOS   ev [singular], mv [plural]
     LIST:  -         mv
+
+    3p : third-person human
+    3o : third-person neuter
+    3m : third-person masculine
+    3v : third-person feminine
+
     """
     sentence = mention.sentence
 
     feats = set(sentence[mention.head].XPOS.split('|'))
-    if 'onz' in feats:
+    if 'onz' in feats or '3o' in feats:
         masculine = 0.0
         feminine = 0.0
         neuter = 1.0
-    elif 'masc' in feats:
+    elif 'masc' in feats or '3m' in feats:
         masculine = 1.0
         feminine = 0.0
         neuter = 0.0
-    elif 'fem' in feats:
+    elif 'fem' in feats or '3v' in feats:
         masculine = 0.0
+        feminine = 1.0
+        neuter = 0.0
+    elif '3p' in feats:
+        masculine = 1.0
         feminine = 1.0
         neuter = 0.0
     else:  # if 'zijd' in feats:
@@ -361,12 +371,9 @@ def features_for_mention(mention):
                     wordvector['man'])
         f = comp_wv(wordvector[clean_token(sentence[mention.head].LEMMA)],
                     wordvector['vrouw'])
-        if m > f:
-            masculine = 1.0
-            feminine = 0.0
-        else:
-            masculine = 0.0
-            feminine = 1.0
+
+        masculine = (m + 1e-8) / (m + f + 1e-8)
+        feminine = (f + 1e-8) / (m + f + 1e-8)
 
     if 'ev' in feats:
         singular = 1.0

@@ -16,8 +16,7 @@ from stroll.model import EntityNet
 from stroll.entity import Entity
 from stroll.entity import action_new_probability, action_add_probabilities
 from stroll.entity import set_wordvector
-
-MAX_CANDIDATES = 50
+from stroll.entity import MAX_CANDIDATES
 
 parser = argparse.ArgumentParser(
         description='Run an entity centric trainsition based  coreference net'
@@ -60,6 +59,12 @@ parser.add_argument(
 parser.add_argument(
         '--output',
         help='Output file in conllu format',
+        )
+parser.add_argument(
+        '--margin',
+        help='Add margin to new entity probability \
+                (negative means more likely to link)',
+        default='0.0',
         )
 
 
@@ -131,6 +136,7 @@ def write_output_mmax(dataset, filename):
 
 
 def eval(net, doc):
+    torch.no_grad()
     net.eval()
 
     # start without entities
@@ -165,11 +171,15 @@ def eval(net, doc):
             action_new_probability(net, entities, mention),
             action_add_probabilities(net, candidates, mention)
             ])
+        all_probs[0] -= args.margin
         action = all_probs.argmax().item()
 
         if args.verbose:
+            srtd, _ = all_probs.sort(descending=True)
             print('----------==', mention.sentence[mention.head].FORM,
-                  'mwt: ', ', '.join(list(mention.mwt)))
+                  'mwt: ', ', '.join(list(mention.mwt)),
+                  'delta:', (srtd[0] - srtd[1]).item()
+                  )
             print('0 New', all_probs[0].item())
             for c in range(len(candidates)):
                 cand = candidates[c]
@@ -207,9 +217,14 @@ def eval(net, doc):
     for entity in entities:
         system_sets.append(entity.as_set())
 
-    score_muc = muc(gold_sets, system_sets)
-    score_b3 = b_cubed(gold_sets, system_sets)
-    score_ce = ceaf_e(gold_sets, system_sets)
+    try:
+        score_muc = muc(gold_sets, system_sets)
+        score_b3 = b_cubed(gold_sets, system_sets)
+        score_ce = ceaf_e(gold_sets, system_sets)
+    except(ZeroDivisionError):
+        score_muc = [0, 0, 0]
+        score_b3 = [0, 0, 0]
+        score_ce = [0, 0, 0]
 
     # write results back to entities and dataset
     for refid, entity in enumerate(entities):
@@ -229,6 +244,8 @@ def eval(net, doc):
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     args = parser.parse_args()
+
+    args.margin = float(args.margin)
 
     # 1. load the MentionNet configuration
     state_dict = torch.load(args.model)

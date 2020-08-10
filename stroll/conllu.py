@@ -95,7 +95,7 @@ class Token():
         return None
 
     def encode(self):
-        if self.COREF in ['_', '-']:
+        if self.COREF in ['_', '-'] or '(' in self.COREF or ')' in self.COREF:
             coref = torch.tensor([0], dtype=torch.int32)
         else:
             coref = torch.tensor([int(self.COREF) + 1], dtype=torch.int32)
