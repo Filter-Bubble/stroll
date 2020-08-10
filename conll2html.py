@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 import argparse
-import re
 
-from stroll.conllu import ConlluDataset, Sentence, Token
-import stanza
+from stroll.conllu import ConlluDataset
 from jinja2 import FileSystemLoader, Environment
 
 
@@ -19,6 +17,7 @@ parser.add_argument(
         'input',
         help='Input files'
         )
+
 
 def write_html(dataset, name):
     loader = FileSystemLoader('.')
