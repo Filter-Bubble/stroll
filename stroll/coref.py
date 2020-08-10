@@ -348,11 +348,10 @@ def build_mentions_from_heads(sentence, heads):
     is_descendant = np.linalg.matrix_power(is_descendant, len(sentence))
 
     # collect the spans
-    mentions = []
+    mentions = {}
     for head in heads:
         if sentence[head].DEPREL == 'punct':
-            mentions.append(
-                Mention(
+            mentions[(head, head)] = Mention(
                     head=head,
                     sentence=sentence,
                     refid=sentence[head].COREF,
@@ -361,7 +360,6 @@ def build_mentions_from_heads(sentence, heads):
                     ids=[head],
                     anaphore=sentence[head].anaphore
                     )
-            )
             continue
 
         # get all tokens that make up the subtree, by construction
@@ -403,19 +401,23 @@ def build_mentions_from_heads(sentence, heads):
         id_end = pruned_ids[-1]
 
         if len(pruned_ids) > 0:
-            mentions.append(
-                Mention(
-                    head=head,
-                    sentence=sentence,
-                    refid=sentence[head].COREF,
-                    start=sentence[id_start].ID,
-                    end=sentence[id_end].ID,
-                    ids=[sentence[i].ID for i in pruned_ids],
-                    anaphore=sentence[head].anaphore
-                    )
-            )
+            start = sentence[id_start].ID
+            end = sentence[id_end].ID
+            if (start, end) in mentions and len(pruned_ids) < len(mentions[(start, end)].ids):
+                continue
+            else:
+                mentions[(start, end)] = Mention(
+                        head=head,
+                        sentence=sentence,
+                        refid=sentence[head].COREF,
+                        start=sentence[id_start].ID,
+                        end=sentence[id_end].ID,
+                        ids=[sentence[i].ID for i in pruned_ids],
+                        anaphore=sentence[head].anaphore
+                        )
 
-    return mentions
+    # TODO: how to correctly prune non consecutive / double mentions?
+    return list(mentions.values())
 
 
 def get_mentions(sentence):
@@ -683,7 +685,10 @@ def postprocess_sentence(sentence):
     """
     # get head based mentions
     mentions = get_mentions(sentence)
-
+    spans = [(m.start, m.end) for m in mentions]
+    if len(spans) > len(set(spans)):
+        logging.warning('Double mention spans in sentence: "{}"'.format(sentence))
+        breakpoint()
     # clear head based annotation
     for token in sentence:
         token.COREF = '_'

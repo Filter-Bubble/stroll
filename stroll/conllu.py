@@ -6,6 +6,7 @@ from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec, \
 from .labels import to_one_hot, to_index
 from .labels import ROLES, FRAMES
 from collections import OrderedDict
+import os
 
 
 COPULA_NOUN_DESC_MOVE_TO_VERB = [
@@ -255,17 +256,17 @@ class ConlluDataset(Dataset):
                 first = False
         return res
 
-    def load_mmax(self, filename):
+    def load_conll2012(self, filename):
         logging.info("Opening {}".format(filename))
 
         with open(filename, "r") as f:
-            mmax_raw = f.readlines()
+            conll2012_raw = f.readlines()
 
         sent_rank = 1
         full_text = []
         sentence = Sentence()
         doc_current_id = filename  # use the filename as default doc_id
-        for line in mmax_raw:
+        for line in conll2012_raw:
 
             # remove possible trailing newline and whitespace
             line = line.rstrip()
@@ -328,7 +329,7 @@ class ConlluDataset(Dataset):
         # <12 columns tab separated, 1 line per token in the sentence>
         # <empty line>
         sentence = Sentence()
-        doc_current_id = filename
+        doc_current_id = os.path.basename(filename)
         for line in conllu_raw:
 
             # remove possible trailing newline and whitespace
@@ -576,3 +577,40 @@ def transform_tree(sentence):
     sentence = transform_copulas(sentence)
     sentence = transform_coordinations(sentence)
     return sentence
+
+def write_output_conll2012(dataset, filename):
+    keyfile = open(filename, 'w')
+
+    firstDoc = True
+    current_doc = None
+    for sentence in dataset:
+        if sentence.doc_id != current_doc:
+            if firstDoc:
+                firstDoc = False
+            else:
+                keyfile.write('#end document\n')
+
+            current_doc = sentence.doc_id
+            keyfile.write('#begin document ({});\n'.format(current_doc))
+        else:
+            keyfile.write('\n')
+
+        for token in sentence:
+            if token.FORM == '':
+                # these are from unfolding the coordination clauses, dont print
+                if token.COREF != '_':
+                    logging.error(
+                            'Hidden token has a coref={}'.format(token.COREF)
+                            )
+                    print(sentence)
+                    print()
+                continue
+            if token.COREF != '_':
+                coref = token.COREF
+            else:
+                coref = '-'
+            keyfile.write('{}\t0\t{}\t{}\t{}\n'.format(
+                sentence.doc_id, token.ID, token.FORM, coref))
+
+    keyfile.write('#end document\n')
+    keyfile.close()

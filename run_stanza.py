@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import re
+import os
 
 from stroll.conllu import ConlluDataset, Sentence, Token
 import stanza
@@ -25,13 +26,24 @@ parser.add_argument(
         action='store_true',
         help='Disable GPU accelaration'
         )
+parser.add_argument(
+        '-f',
+        '--format',
+        choices=['conll2012', 'conllu', 'txt'],
+        default='txt'
+)
+parser.add_argument(
+        '--keep_coref',
+        action='store_true',
+        help='Retain the column for coref'
+        )
 
 processor_dict = {
-    'mwt': 'alpino',  # needed to get FEATS from the pos processor
+    #'mwt': 'alpino',  # needed to get FEATS from the pos processor
     'tokenize': 'alpino',
-    'pos': 'nl_combined',
-    'lemma': 'nl_combined',
-    'depparse': 'nl_combined',
+    'pos': 'combined',
+    'lemma': 'combined',
+    'depparse': 'combined',
     # 'ner': None
 }
 
@@ -61,54 +73,91 @@ def dataset_from_text_files(names=None, dataset=None):
         sent_idx = 0
         with open(name, 'r') as infile:
             for line in infile:
-                groups = doc_and_sent_id.match(line).groups()
-                if groups[3]:
-                    doc_id = groups[1]
-                    sent_id = groups[3]
-                elif groups[1]:
-                    doc_id = name
-                    sent_id = groups[1]
-                else:
-                    doc_id = name
-                    sent_id = '{:10d}'.format(sent_idx)
+                if len(line.strip())>0:
+                    groups = doc_and_sent_id.match(line).groups()
+                    if groups[3]:
+                        doc_id = groups[1]
+                        sent_id = groups[3]
+                    elif groups[1]:
+                        doc_id = name
+                        sent_id = groups[1]
+                    else:
+                        doc_id = name
+                        sent_id = '{:10d}'.format(sent_idx)
 
-                full_text = groups[4]
-                parsed = nlp(full_text).to_dict()
+                    full_text = groups[4]
+                    parsed = nlp(full_text).to_dict()
 
-                sentence = Sentence()
-                for t in parsed[0]:
-                    if 'feats' not in t:
-                        t['feats'] = '_'
-                    token = Token([
-                      t['id'],  # ID
-                      t['text'],  # FORM
-                      t['lemma'],  # LEMMA
-                      t['upos'],  # UPOS
-                      t['xpos'],  # XPOS
-                      t['feats'],  # FEATS
-                      '{}'.format(t['head']),  # HEAD
-                      t['deprel'],  # DEPREL
-                      '_',  # DEPS
-                      '_'  # MISC
-                    ])
-                    sentence.add(token)
+                    sentence = Sentence()
+                    for t in parsed[0]:
+                        if 'feats' not in t:
+                            t['feats'] = '_'
+                        token = Token([
+                          t['id'],  # ID
+                          t['text'],  # FORM
+                          t['lemma'],  # LEMMA
+                          t['upos'],  # UPOS
+                          t['xpos'],  # XPOS
+                          t['feats'],  # FEATS
+                          '{}'.format(t['head']),  # HEAD
+                          t['deprel'],  # DEPREL
+                          '_',  # DEPS
+                          '_'  # MISC
+                        ])
+                        sentence.add(token)
 
-                sentence.full_text = full_text
-                sentence.doc_id = doc_id
-                sentence.sent_id = sent_id
-                dataset.add(sentence)
+                    sentence.full_text = full_text
+                    sentence.doc_id = doc_id
+                    sentence.sent_id = sent_id
+                    dataset.add(sentence)
 
-                sent_idx += 1
+                    sent_idx += 1
 
     return dataset
 
 
+def parse_dataset(dataset, nlp, keep_coref=False):
+    """
+    Parse tokenized dataset with stanza,
+    Overwriting all fields of the tokens (except FORM).
+    """
+    for sentence in dataset.sentences:
+        tokens = [[t.FORM for t in sentence]]
+        parsed = nlp(tokens).to_dict()
+        for token, parsed_token in zip(sentence.tokens, parsed[0]):
+            token.ID = parsed_token['id']
+            token.LEMMA = parsed_token['lemma']
+            token.UPOS = parsed_token['upos']
+            token.XPOS = parsed_token['xpos']
+            token.FEATS = parsed_token.get('feats', '_')
+            token.HEAD = '{}'.format(parsed_token['head'])
+            token.DEPREL = parsed_token['deprel']
+            token.MISC = '_'
+            token.FRAME = '_'
+            token.ROLE = '_'
+            if not keep_coref:
+                token.COREF= '_'
+    return dataset
+
 if __name__ == '__main__':
     args = parser.parse_args()
 
-    # stanza.download('nl', package='alpino')
-    nlp = stanza.Pipeline('nl', processors=processor_dict, package=None, use_gpu=not args.nogpu)
+    if args.format == 'txt':
+        nlp = stanza.Pipeline('nl', processors=processor_dict, package=None, use_gpu=not args.nogpu)
+        dataset = dataset_from_text_files(args.input)
+    elif args.format == 'conllu':
+        nlp = stanza.Pipeline('nl', processors=processor_dict, package=None, tokenize_pretokenized=True, use_gpu=not args.nogpu)
+        dataset = ConlluDataset()
+        for input_file in args.input:
+            dataset._load(input_file)
+        dataset = parse_dataset(dataset, nlp, keep_coref=args.keep_coref)
+    elif args.format == 'conll2012':
+        nlp = stanza.Pipeline('nl', processors=processor_dict, package=None, tokenize_pretokenized=True, use_gpu=not args.nogpu)
+        dataset = ConlluDataset()
+        for input_file in args.input:
+            dataset.load_conll2012(input_file, keep_coref=args.keep_coref)
+        dataset = parse_dataset(dataset, nlp)
 
-    dataset = dataset_from_text_files(args.input)
-    with open(args.output, 'w') as outfile:
+    output  = args.output if args.output is not None else args.input[0]+'_stanza.conll'
+    with open(output, 'w') as outfile:
         outfile.write(dataset.__repr__())

@@ -31,8 +31,8 @@ parser.add_argument(
         help='Trained MentionNet to use',
         )
 parser.add_argument(
-        '--mmax',
-        help='Output file in MMAX format',
+        '--conll2012',
+        help='Output file in conll2012 format',
         )
 parser.add_argument(
         '--score',
@@ -52,7 +52,7 @@ parser.add_argument(
         )
 
 
-def write_output_mmax(dataset, filename):
+def write_output_conll2012(dataset, filename):
     keyfile = open(filename, 'w')
 
     firstDoc = True
@@ -208,8 +208,8 @@ if __name__ == '__main__':
         with open(args.output, 'w') as f:
             f.write(dataset.__repr__())
 
-    # 4. Output: span based mmax
-    if args.mmax:
+    # 4. Output: span based conll2012
+    if args.conll2012:
         for sentence in dataset:
             postprocess_sentence(sentence)
-        write_output_mmax(dataset, args.output)
+        write_output_conll2012(dataset, args.output)
