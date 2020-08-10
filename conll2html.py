@@ -12,7 +12,11 @@ parser.add_argument(
         '--output',
         help='Output filename'
         )
-parser.add_argument('-t', '--type', choices=['conll', 'conll2012'], default='conll')
+parser.add_argument(
+        '-t', '--type',
+        choices=['conll', 'conll2012'],
+        default='conll'
+        )
 parser.add_argument(
         'input',
         help='Input files'

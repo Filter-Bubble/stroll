@@ -12,7 +12,7 @@ from sklearn.metrics import precision_recall_fscore_support as PRF
 from scorch.scores import muc, b_cubed, ceaf_e
 
 from stroll.conllu import ConlluDataset, write_output_conll2012
-from stroll.coref import preprocess_sentence, postprocess_sentence
+from stroll.coref import postprocess_sentence
 from stroll.coref import mark_gold_anaphores
 from stroll.coref import nearest_linking
 from stroll.coref import predict_anaphores, predict_similarities

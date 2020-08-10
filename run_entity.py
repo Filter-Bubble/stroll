@@ -97,9 +97,6 @@ def write_html(dataset, name):
         )
 
 
-
-
-
 def eval(net, doc):
     torch.no_grad()
     net.eval()

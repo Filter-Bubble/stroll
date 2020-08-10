@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 import argparse
-import re
 
-from stroll.conllu import ConlluDataset, Sentence, Token, write_output_conll2012
+from stroll.conllu import ConlluDataset, write_output_conll2012
 from stroll.coref import preprocess_sentence, postprocess_sentence
 
 import logging
 
 parser = argparse.ArgumentParser(
-        description='Convert CONLL-U file with coreferences in head notation to CONLL2012 files with span based coreferences'
+        description='Convert CONLL-U file with coreferences in head \
+                notation to CONLL2012 files with span based coreferences'
         )
 parser.add_argument(
         'input',
@@ -19,14 +19,14 @@ parser.add_argument(
         'output',
         help='Output file in CONLL2012 format',
         )
-parser.add_argument('-i',
-        '--input_format',
+parser.add_argument(
+        '-i', '--input_format',
         choices=['conllu', 'conll2012'],
         help='Format of input file',
         default='conllu'
         )
-parser.add_argument('-o',
-        '--output_format',
+parser.add_argument(
+        '-o', '--output_format',
         choices=['conllu', 'conll2012'],
         help='Format of output file',
         default='conll2012'

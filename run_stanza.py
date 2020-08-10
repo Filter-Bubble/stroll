@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import re
-import os
 
 from stroll.conllu import ConlluDataset, Sentence, Token
 import stanza
@@ -39,7 +38,7 @@ parser.add_argument(
         )
 
 processor_dict = {
-    #'mwt': 'alpino',  # needed to get FEATS from the pos processor
+    # 'mwt': 'alpino',  # needed to get FEATS from the pos processor
     'tokenize': 'alpino',
     'pos': 'combined',
     'lemma': 'combined',
@@ -73,7 +72,7 @@ def dataset_from_text_files(names=None, dataset=None):
         sent_idx = 0
         with open(name, 'r') as infile:
             for line in infile:
-                if len(line.strip())>0:
+                if len(line.strip()) > 0:
                     groups = doc_and_sent_id.match(line).groups()
                     if groups[3]:
                         doc_id = groups[1]
@@ -136,28 +135,52 @@ def parse_dataset(dataset, nlp, keep_coref=False):
             token.FRAME = '_'
             token.ROLE = '_'
             if not keep_coref:
-                token.COREF= '_'
+                token.COREF = '_'
     return dataset
+
 
 if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.format == 'txt':
-        nlp = stanza.Pipeline('nl', processors=processor_dict, package=None, use_gpu=not args.nogpu)
+        nlp = stanza.Pipeline(
+                'nl',
+                processors=processor_dict,
+                package=None,
+                use_gpu=not args.nogpu
+                )
         dataset = dataset_from_text_files(args.input)
+
     elif args.format == 'conllu':
-        nlp = stanza.Pipeline('nl', processors=processor_dict, package=None, tokenize_pretokenized=True, use_gpu=not args.nogpu)
+        nlp = stanza.Pipeline(
+                'nl',
+                processors=processor_dict,
+                package=None,
+                tokenize_pretokenized=True,
+                use_gpu=not args.nogpu
+                )
         dataset = ConlluDataset()
         for input_file in args.input:
             dataset._load(input_file)
         dataset = parse_dataset(dataset, nlp, keep_coref=args.keep_coref)
+
     elif args.format == 'conll2012':
-        nlp = stanza.Pipeline('nl', processors=processor_dict, package=None, tokenize_pretokenized=True, use_gpu=not args.nogpu)
+        nlp = stanza.Pipeline(
+                'nl',
+                processors=processor_dict,
+                package=None,
+                tokenize_pretokenized=True,
+                use_gpu=not args.nogpu
+                )
         dataset = ConlluDataset()
         for input_file in args.input:
             dataset.load_conll2012(input_file, keep_coref=args.keep_coref)
         dataset = parse_dataset(dataset, nlp)
 
-    output  = args.output if args.output is not None else args.input[0]+'_stanza.conll'
+    if not args.output:
+        output = args.input[0] + '_stanza.conll'
+    else:
+        output = args.output
+
     with open(output, 'w') as outfile:
         outfile.write(dataset.__repr__())
