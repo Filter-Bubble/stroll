@@ -252,7 +252,7 @@ if __name__ == '__main__':
     hyperparams = state_dict.pop('hyperparams')
 
     # Load the FastText model
-    ft = '/home/jiska/Code/ernie/resources/fasttext.model.bin'
+    ft = 'models/fasttext.model.bin'
     logging.info('Loading default wordvectors {}'.format(ft))
     set_wordvector(fasttext.load_model(ft))
 
