@@ -489,8 +489,8 @@ class EntityNet(nn.Module):
                 pyramid=True,
                 bias=False)
 
-        # 34 -> 1
-        self.combine_evidence = MLP(34, 1, pyramid=True, batchnorm=False,
+        # 41 -> 1
+        self.combine_evidence = MLP(41, 1, pyramid=True, batchnorm=False,
                                     bias=True)
 
         # self.default_compatability = torch.nn.Parameter(

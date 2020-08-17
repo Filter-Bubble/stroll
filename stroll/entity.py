@@ -57,13 +57,31 @@ class Entity():
         self.features.detach()
 
     def quantized_length(self):
-        if len(self.mentions) == 1:
-            ql = torch.tensor([0.0])
-        elif len(self.mentions) < 4:
-            ql = torch.tensor([0.5])
-        else:
-            ql = torch.tensor([1.0])
-        return ql
+        # length of the entity
+        count = min(len(self.mentions), 10)
+        ql = count / 10.0
+
+        # length per mention type
+        types = {
+                'LIST': 0,
+                'PRONOMIAL': 0,
+                'PROPER': 0,
+                'NOMINAL': 0
+                }
+        for mention in self.mentions:
+            types[mention.type()] += 1
+
+        for t in types:
+            count = min(types[t], 4)
+            types[t] = count / 4.0
+
+        return torch.tensor([
+            ql,
+            types['LIST'],
+            types['PRONOMIAL'],
+            types['PROPER'],
+            types['NOMINAL']
+            ])
 
     def add(self, mention):
         self.mentions.append(mention)
@@ -141,11 +159,11 @@ def quantized_distance_top_to_mention(entity, mention):
     # Distance form the entity
     # assume the mentions are from the same document
     top = entity.mentions[-1]
-    distance = abs(mention.sentence.sent_rank - top.sentence.sent_rank)
-    if distance > 3:
-        return torch.tensor([0.0])
-    else:
-        return torch.tensor([(3.0 - distance)/3])
+    distance = min(
+            abs(mention.sentence.sent_rank - top.sentence.sent_rank),
+            10.0
+            )
+    return torch.tensor([distance / 10.0])
 
 
 def semantic_role_mention(mention):
@@ -328,9 +346,9 @@ def features_for_mention(mention):
     """
     Features from the conll XPOS for the mention.
 
-    [masculine, feminine, neuter, plural, singular]
+    [masculine, feminine, neuter, plural, singular, 1p, 2p, 3p]
 
-    dim : 5
+    dim : 8
 
     NOUN : in XPOS   zijd [m/f], onz [n]
            in XPOS   ev [singular], mv [plural]
@@ -340,6 +358,11 @@ def features_for_mention(mention):
            in XPOS   ev [singular], mv [plural]
     LIST:  -         mv
 
+    1  : first-person
+    2  : second-person
+    2b : second-person polite
+    2v : second-person familiar
+    3  : third-person
     3p : third-person human
     3o : third-person neuter
     3m : third-person masculine
@@ -388,7 +411,22 @@ def features_for_mention(mention):
         singular = 0.5
         plural = 0.5  # TODO
 
-    return torch.tensor([masculine, feminine, neuter, singular, plural])
+    p1 = 0.0
+    p2 = 0.0
+    p3 = 0.0
+    if '1' in feats:
+        p1 = 1.0
+    if '2' in feats or '2b' in feats or '2v' in feats:
+        p2 = 1.0
+    if '3' in feats or '3p' in feats or '3o' in feats or \
+            '3m' in feats or '3v' in feats:
+        p3 = 1.0
+
+    return torch.tensor([
+        masculine, feminine, neuter,
+        singular, plural,
+        p1, p2, p3
+        ])
 
 
 def relative_position_in_sentence(mention):
@@ -453,7 +491,7 @@ def action_add_probabilities(net, entities=[], mention=None):
     input = []
     for entity in entities:
         input.append(torch.cat([
-            #  * 1 quantized entity size
+            #  * 5 quantized entity size
             entity.quantized_length(),
 
             #  * 2 wordvector_similarity_entity_to_mention
@@ -465,7 +503,7 @@ def action_add_probabilities(net, entities=[], mention=None):
             #  * 1 modifiers agreement
             modifier_agreement_entity_mention(entity, mention),
 
-            #  * 5 feature match entity
+            #  * 8 feature match entity
             entity.features * features_for_mention(mention) * 0.2,
 
             #  * 4 mention type
@@ -487,5 +525,5 @@ def action_add_probabilities(net, entities=[], mention=None):
             ])
         )
 
-    # pass through network 34 -> 1
+    # pass through network 41 -> 1
     return net.combine_evidence(torch.stack(input)).view(-1)

@@ -342,7 +342,7 @@ def main(args):
     logging.basicConfig(level=logging.INFO)
 
     exp_name = 'entity' + \
-        '_v0.55_{}_stat'.format(MAX_CANDIDATES)
+        '_v0.58_{}_stat'.format(MAX_CANDIDATES)
 
     args.exp_name = exp_name
     print('Experiment {}'.format(args.exp_name))
