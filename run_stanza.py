@@ -174,8 +174,8 @@ if __name__ == '__main__':
                 )
         dataset = ConlluDataset()
         for input_file in args.input:
-            dataset.load_conll2012(input_file, keep_coref=args.keep_coref)
-        dataset = parse_dataset(dataset, nlp)
+            dataset.load_conll2012(input_file)
+        dataset = parse_dataset(dataset, nlp, keep_coref=args.keep_coref)
 
     if not args.output:
         output = args.input[0] + '_stanza.conll'

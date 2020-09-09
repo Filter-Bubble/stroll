@@ -94,7 +94,8 @@ class Mention():
         p += '# sent_id:   {}\n'.format(self.sentence.sent_id)
         p += '# full_text: {}\n'.format(self.sentence.full_text)
         p += 'refid= {}\n'.format(self.refid)
-        p += 'head=  {} {}\n'.format(self.head, self.sentence[self.head].FORM)
+        if self.head:
+            p += 'head=  {} {}\n'.format(self.head, self.sentence[self.head].FORM)
         p += 'span=  {}-{}\n'.format(self.start, self.end)
         p += 'text= {}\n'.format([self.sentence[i].FORM for i in self.ids])
         return p
