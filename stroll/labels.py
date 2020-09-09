@@ -2,7 +2,7 @@ import torch
 from sklearn.preprocessing import LabelEncoder
 from transformers import BertTokenizer, BertModel
 import fasttext
-
+import logging
 
 UPOS = [
         '_', 'ADJ', 'ADP', 'ADV', 'AUX', 'CCONJ', 'DET', 'INTJ', 'NOUN',
@@ -96,6 +96,10 @@ feats_codec = LabelEncoder().fit(FEATS)
 frame_codec = LabelEncoder().fit(FRAMES)
 role_codec = LabelEncoder().fit(ROLES)
 mention_type_codec = LabelEncoder().fit(MENTION_TYPES)
+
+firstnamesFem = {}
+firstnamesMasc = {}
+firstnames_initialized = False
 
 
 def to_one_hot(codec, values):
@@ -196,3 +200,41 @@ class BertEncoder:
                 word_vectors.append(torch.zeros([self.dims]))
 
         return word_vectors
+
+
+def firstname_gender(name):
+    global firstnames_initialized
+
+    if not firstnames_initialized:
+        firstnames_initialized = True
+        try:
+            with open('models/top.csv', 'r') as f:
+                lines = f.readlines()
+        except(FileNotFoundError):
+            logging.error('top.csv not found, \
+                    cannot determine gender of first names.')
+            lines = []
+
+        for i in range(2, len(lines)):
+            # 1;Maria;368.464;Johannes;330.057
+            line = lines[i].lower()
+            fields = line.split(';')
+            if len(fields[1]):
+                firstnamesFem[fields[1].lower()] = float(fields[2])
+            if len(fields[3]):
+                firstnamesMasc[fields[3].lower()] = float(fields[4])
+
+    n = name.lower()
+    if n in firstnamesMasc:
+        m = firstnamesMasc[n]
+    else:
+        m = 0.0
+    if n in firstnamesFem:
+        f = firstnamesFem[n]
+    else:
+        f = 0.0
+
+    m = m / (m + f + 1e-8)
+    f = f / (m + f + 1e-8)
+
+    return m, f

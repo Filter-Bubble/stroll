@@ -6,6 +6,8 @@ from stroll.labels import mention_type_codec
 from stroll.coref import get_multi_word_token
 from stroll.coref import clean_token
 
+from numba import jit
+
 MAX_CANDIDATES = 50
 
 wordvector = None
@@ -194,6 +196,7 @@ def semantic_role_mention(mention):
     return mdr
 
 
+@jit(nopython=True)
 def comp_wv(wa, wb):
     """
     Dot product between normalized vectors

@@ -3,8 +3,11 @@ import logging
 
 import fasttext
 import numpy as np
+from math import log
+
 import torch
 
+from numba import jit
 from scorch.scores import muc, b_cubed, ceaf_e
 
 from torch.utils.tensorboard import SummaryWriter
@@ -29,13 +32,13 @@ parser = argparse.ArgumentParser(
 parser.add_argument(
         '--train',
         dest='train_set',
-        default='squick_coref.conll',  # 'train_orig_all.conll',
+        default='squick_coref2.conll',  # 'train_orig_all.conll',
         help='Train dataset in conllu format',
         )
 parser.add_argument(
         '--test',
         dest='test_set',
-        default='squick_coref.conll',
+        default='squick_coref2.conll',
         help='Test dataset in conllu format',
         )
 parser.add_argument(
@@ -57,7 +60,7 @@ def save_model(model, optimizer):
     d = model.state_dict()
     d['hyperparams'] = args
     d['optimizer'] = optimizer.state_dict()
-    name = './runs_entity/{}/model_{:09d}.pt'.format(
+    name = './runs_entity2/{}/model_{:09d}.pt'.format(
             args.exp_name, args.word_count
             )
     torch.save(d, name)
@@ -92,16 +95,21 @@ def oracle_losses(entities=[], mention=None):
     return torch.tensor(losses)
 
 
-def train_one(net, entities=[], mention=None, dynamic_oracle=False):
+def train_one(net, entities=[], mention=None, dynamic_oracle=True):
     net.train()
 
     # short cut for single action
     if len(entities) == 0:
         new_entity = Entity()
+        new_entity.refid = len(entities)
         new_entity.add(mention)
         entities.append(new_entity)
-        loss = torch.tensor([float('nan')])
-        return loss
+        return {
+                'truth': mention.refid,
+                'guess': 'new',
+                'options': ['new'],
+                'probs': torch.cat([torch.ones(1)])
+                }
 
     # sort entities by distance
     ranking = []
@@ -129,28 +137,31 @@ def train_one(net, entities=[], mention=None, dynamic_oracle=False):
     costs = oracle_losses(candidates, mention)
     oracle_action = costs.argmin().item()
 
-    # hingeloss
-    # all_probs = torch.softmax(all_probs, dim=0)
-    # loss = torch.mean(torch.relu(
-    #         0.05 + all_probs - all_probs[oracle_action]
-    #         )**2.0)
-    log_all_probs = torch.log_softmax(all_probs, dim=0)
-    prob = torch.exp(log_all_probs[oracle_action])
-    loss = -1.0 * ((1.0 - prob)**1.5) * log_all_probs[oracle_action]
-
-    # # boost loss for non-new entity
-    # if oracle_action == 0:
-    #     loss = loss * 0.01
-
     if dynamic_oracle:
         action = dynamic_action
     else:
         action = oracle_action
 
+    # truth mention.refid
+    # guess action
+    # actions: ['new', ...candidates.refid]
+    # probs: all_probs
+    trace = {
+            'truth': mention.refid,
+
+            'guess': 'new' if action == 0 else candidates[action-1].refid,
+
+            'options':
+            ['new'] + [candidate.refid for candidate in candidates],
+
+            'probs': all_probs
+            }
+
     # print('Oracle:', oracle_action, 'Action:', dynamic_action, 'Loss:', loss)
     if action == 0:
         # start a new entity
         new_entity = Entity()
+        new_entity.refid = len(entities)
         new_entity.add(mention)
         entities.append(new_entity)
     else:
@@ -162,7 +173,7 @@ def train_one(net, entities=[], mention=None, dynamic_oracle=False):
             # add to existing entity
             candidates[action - 1].add(mention)
 
-    return loss
+    return trace
 
 
 def eval(net, doc):
@@ -177,6 +188,7 @@ def eval(net, doc):
         # short cut for single action
         if len(entities) == 0:
             new_entity = Entity()
+            new_entity.refid = len(entities)
             new_entity.rank = len(entities)
             new_entity.add(mention)
             entities.append(new_entity)
@@ -205,6 +217,7 @@ def eval(net, doc):
         if action == 0:
             # start a new entity
             new_entity = Entity()
+            new_entity.refid = len(entities)
             new_entity.add(mention)
             new_entity.rank = len(entities)
             entities.append(new_entity)
@@ -241,6 +254,62 @@ def eval(net, doc):
     return score_muc, score_b3, score_ce
 
 
+@jit(nopython=True)
+def vi_from_cm(cm):
+    ni, nj = cm.shape
+
+    n = 0.0
+    pa = np.zeros(ni)
+    pb = np.zeros(nj)
+    for i in range(ni):
+        for j in range(nj):
+            pa[i] += cm[i, j]
+            pb[j] += cm[i, j]
+            n += cm[i, j]
+
+    for i in range(ni):
+        if pa[i] > 1:
+            pa[i] = log(pa[i])
+        else:
+            pa[i] = 0
+
+    for j in range(nj):
+        if pb[j] > 1:
+            pb[j] = log(pb[j])
+        else:
+            pb[j] = 0
+
+    logc = np.zeros_like(cm)
+    for i in range(ni):
+        for j in range(nj):
+            if cm[i, j] > 1:
+                logc[i, j] = log(cm[i, j])
+
+    s = 0.0
+    for i in range(ni):
+        for j in range(nj):
+            s += cm[i, j] * (2.0 * logc[i, j] - pa[i] - pb[j])
+
+    return -(s / (n * log(n)))
+
+
+def vi_from_cm_slow(cm):
+    n = cm.sum()
+
+    pa = cm.sum(axis=1)
+    pb = cm.sum(axis=0)
+
+    pa = np.where(pa < 1, 1, pa)
+    pb = np.where(pb < 1, 1, pb)
+
+    logpa = np.broadcast_to(np.log(pa), (len(pb), len(pa))).transpose()
+    logpb = np.broadcast_to(np.log(pb), (len(pa), len(pb)))
+
+    logc = np.log(np.where(cm < 1, 1, cm))
+
+    return -np.sum(cm * (2 * logc - logpa - logpb)) / (n * np.log(n))
+
+
 def train(net, test_docs, train_docs,
           optimizer, epochs=1):
 
@@ -253,18 +322,97 @@ def train(net, test_docs, train_docs,
             doc = train_docs[doc_rank]
             logging.info('Training doc has length {}'.format(len(doc)))
 
-            if len(doc) == 0:
+            if len(doc) == 0 or len(doc) > 500:
                 continue
 
             # start without entities
             entities = []
 
             # add the mentions one-by-one to the entities
-            total_loss = torch.zeros(1)
+            trace = []
+            ids_truth = set()
+            ids_guess = set()
+            next_refid = 0
             for mention in doc:
-                loss = train_one(net, entities, mention)
-                if loss.requires_grad and not torch.isnan(loss):
-                    total_loss += loss
+                step = train_one(net, entities, mention)
+                trace.append(step)
+
+                # find all correct / guessed refids
+                guess = step['guess']
+                if guess == 'new':
+                    guess = next_refid
+                    next_refid += 1
+                ids_guess.add(guess)
+                ids_truth.add(step['truth'])
+
+            # map refid's to an index
+            truth_to_idx = {}
+            for idx, t in enumerate(ids_truth):
+                truth_to_idx[t] = idx
+
+            guess_to_idx = {}
+            ids_guess.add('singleton')  # a guaranteed-to-be singleton entity
+            for idx, t in enumerate(ids_guess):
+                guess_to_idx[t] = idx
+
+            # build contigency matrix
+            cm = np.zeros([len(ids_truth), len(ids_guess)])
+            next_refid = 0
+            for step in trace:
+                guess = step['guess']
+                if guess == 'new':
+                    guess = next_refid
+                    next_refid += 1
+                truth = step['truth']
+                cm[truth_to_idx[truth], guess_to_idx[guess]] += 1
+
+            total_loss = torch.zeros(1)
+
+            # calculate losses
+            next_refid = 0
+            for step in trace:
+                guess = step['guess']
+                if guess == 'new':
+                    guess = next_refid
+                    next_refid += 1
+                truth = step['truth']
+
+                # remove this step
+                cm[truth_to_idx[truth], guess_to_idx[guess]] -= 1
+
+                # calculate the VI for possible alternative steps
+                VI_by_alt = {}
+                for alt in ids_guess:
+                    # if alt in step['options'] or \
+                    #         alt == 'singleton' or \
+                    #         cm[truth_to_idx[truth], guess_to_idx[alt]] != 0:
+                    # take this step
+                    cm[truth_to_idx[truth], guess_to_idx[alt]] += 1
+
+                    d = vi_from_cm(cm)
+                    VI_by_alt[alt] = np.exp(10. * d) * d
+
+                    # undo this step
+                    cm[truth_to_idx[truth], guess_to_idx[alt]] -= 1
+
+                # softmax over probs
+                all_probs = torch.softmax(step['probs'], dim=0)
+
+                vi = torch.zeros_like(all_probs)
+                for i, alt in enumerate(step['options']):
+                    if alt == 'new':
+                        continue
+                    # for this option, the cost is the VI as calculated
+                    vi[i] = VI_by_alt.pop(step['options'][i])
+
+                # all remaining choices / clusters are reached via starting
+                # a new cluster, so take the minimum value
+                vi[0] = min(VI_by_alt.values())
+
+                total_loss += torch.dot(vi, all_probs)
+
+                # restore the step
+                cm[truth_to_idx[truth], guess_to_idx[guess]] += 1
 
             args.word_count += 1
 
@@ -342,7 +490,7 @@ def main(args):
     logging.basicConfig(level=logging.INFO)
 
     exp_name = 'entity' + \
-        '_v0.58_{}_stat'.format(MAX_CANDIDATES)
+        '_v2.6_dyn_{}_stat'.format(MAX_CANDIDATES)
 
     args.exp_name = exp_name
     print('Experiment {}'.format(args.exp_name))
@@ -389,7 +537,7 @@ def main(args):
             ))
 
     print('Tensorboard output in "{}".'.format(exp_name))
-    writer = SummaryWriter('runs_entity/' + exp_name)
+    writer = SummaryWriter('runs_entity2/' + exp_name)
 
     net = EntityNet()
 
@@ -419,6 +567,6 @@ def main(args):
 
 
 if __name__ == '__main__':
-    torch.manual_seed(43)
+    torch.manual_seed(42)
     args = parser.parse_args()
     main(args)  # BUGFIX after run 32
