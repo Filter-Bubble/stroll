@@ -1,0 +1,14 @@
+# newdoc id = jip-en-janneke
+# sent_id = 1
+# text = Jip liep in de tuin en hij verveelde zich zo .
+1	Jip	Jip	PROPN	N|eigen|ev|basis|zijd|stan	Gender=Com|Number=Sing	2	nsubj	_	_	_	_	(0)
+2	liep	lopen	VERB	WW|pv|verl|ev	Number=Sing|Tense=Past|VerbForm=Fin	0	root	_	_	_	_	-
+3	in	in	ADP	VZ|init	_	5	case	_	_	_	_	-
+4	de	de	DET	LID|bep|stan|rest	Definite=Def	5	det	_	_	_	_	(1
+5	tuin	tuin	NOUN	N|soort|ev|basis|zijd|stan	Gender=Com|Number=Sing	2	obl	_	_	_	_	1)
+6	en	en	CCONJ	VG|neven	_	8	cc	_	_	_	_	-
+7	hij	hij	PRON	VNW|pers|pron|nomin|vol|3|ev|masc	Case=Nom|Person=3|PronType=Prs	8	nsubj	_	_	_	_	(0)
+8	verveelde	vervelen	VERB	WW|pv|verl|ev	Number=Sing|Tense=Past|VerbForm=Fin	2	conj	_	_	_	_	-
+9	zich	zich	PRON	VNW|refl|pron|obl|red|3|getal	Case=Acc|Person=3|PronType=Prs|Reflex=Yes	8	expl:pv	_	_	_	_	(2)
+10	zo	zo	ADV	BW	_	8	advmod	_	_	_	_	-
+11	.	.	PUNCT	LET	_	2	punct	_	_	_	_	-

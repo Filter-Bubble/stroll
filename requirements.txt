@@ -12,3 +12,5 @@ seaborn
 stanza
 scorch
 Jinja2
+numba
+tensorboard
