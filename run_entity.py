@@ -196,7 +196,7 @@ def eval(net, doc):
             if args.verbose:
                 print(mention)
             mention.refid = refid
-            mention.sentence[mention.head].COREF = '{}'.format(refid)
+            mention.sentence[mention.head].COREF_HEAD = '{}'.format(refid)
         if args.verbose:
             print('= - = - = - = - = - = - =')
 
