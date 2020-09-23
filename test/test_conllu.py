@@ -16,4 +16,5 @@ def test_load_conllu():
     sent = dataset[0]
     assert len(sent) == 11
     tok = sent[0]
-    tok.COREF = '(0)'
+    assert tok.COREF == '(0)'
+    assert tok.COREF_HEAD == None

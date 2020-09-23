@@ -144,7 +144,7 @@ class Mention():
         while token.HEAD not in visited:
             token = sentence[token.HEAD]
             visited.append(token.ID)
-            if token.COREF != '_':
+            if token.COREF_HEAD != '_':
                 return 1.0
 
         return 0.0
@@ -355,7 +355,7 @@ def build_mentions_from_heads(sentence, heads):
             mentions[(head, head)] = Mention(
                     head=head,
                     sentence=sentence,
-                    refid=sentence[head].COREF,
+                    refid=sentence[head].COREF_HEAD,
                     start=head,
                     end=head,
                     ids=[head],
@@ -410,7 +410,7 @@ def build_mentions_from_heads(sentence, heads):
                 mentions[(start, end)] = Mention(
                         head=head,
                         sentence=sentence,
-                        refid=sentence[head].COREF,
+                        refid=sentence[head].COREF_HEAD,
                         start=sentence[id_start].ID,
                         end=sentence[id_end].ID,
                         ids=[sentence[i].ID for i in pruned_ids],
@@ -429,7 +429,7 @@ def get_mentions(sentence):
     """
     heads = []
     for token in sentence:
-        if token.COREF != '_':
+        if token.COREF_HEAD != '_':
             heads.append(token.ID)
 
     return build_mentions_from_heads(sentence, heads)
@@ -447,13 +447,13 @@ def mark_gold_anaphores(dataset):
             doc_rank = sentence.doc_rank
             entities = {}
         for token in sentence:
-            if token.COREF == '_':
+            if token.COREF_HEAD == '_':
                 continue
-            if token.COREF in entities:
-                entities[token.COREF] += 1
+            if token.COREF_HEAD in entities:
+                entities[token.COREF_HEAD] += 1
                 token.anaphore = 1.0
             else:
-                entities[token.COREF] = 1
+                entities[token.COREF_HEAD] = 1
                 token.anaphore = 0.0
 
 
@@ -665,13 +665,13 @@ def preprocess_sentence(sentence):
     bra_ket_mentions = get_mentions_from_bra_ket(sentence)
     head_mentions = convert_mentions(bra_ket_mentions)
 
-    # clear bra-ket annotations
+    # clear annotations if present
     for token in sentence:
-        token.COREF = '_'
+        token.COREF_HEAD = '_'
 
     # add head based annotations
     for mention in head_mentions:
-        sentence[mention.head].COREF = mention.refid
+        sentence[mention.head].COREF_HEAD = mention.refid
 
     return bra_ket_mentions, head_mentions
 

@@ -170,15 +170,15 @@ if __name__ == '__main__':
                 zip(sent_indices, token_indices, system):
             if isMention:
                 if token_index in refid_lookup[sent_index]:
-                    dataset[sent_index][token_index].COREF = \
+                    dataset[sent_index][token_index].COREF_HEAD = \
                             refid_lookup[sent_index][token_index]
                 else:
                     # treat every mention as a new entity
-                    dataset[sent_index][token_index].COREF = \
+                    dataset[sent_index][token_index].COREF_HEAD = \
                             '{}'.format(entity)
                     entity += 1
             else:
-                dataset[sent_index][token_index].COREF = '_'
+                dataset[sent_index][token_index].COREF_HEAD = '_'
 
         if args.score:
             # correct mentions:

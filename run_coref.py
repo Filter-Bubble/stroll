@@ -78,8 +78,8 @@ def write_html(dataset, name):
                     'sentences': [sentence]
                     }
         for token in sentence:
-            if token.COREF != '_':
-                entities[token.COREF] = 1
+            if token.COREF_HEAD != '_':
+                entities[token.COREF_HEAD] = 1
 
     with open(name, 'w') as f:
         f.write(template.render(
@@ -167,12 +167,12 @@ def main(args):
         # clear old info
         for s in dataset:
             for t in s:
-                t.COREF = '_'
+                t.COREF_HEAD = '_'
 
         sent_index = test_graph.ndata['sent_index'][mention_idxs]
         token_index = test_graph.ndata['token_index'][mention_idxs]
         for s, t, m in zip(sent_index, token_index, system_clusters):
-            dataset[s][t].COREF = '{:d}'.format(int(m))
+            dataset[s][t].COREF_HEAD = '{:d}'.format(int(m))
 
         if args.score:
             # score the clustering

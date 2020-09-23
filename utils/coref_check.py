@@ -79,7 +79,7 @@ def transform_tree(sentence):
     # transform each coordination
     #           ^                           ^
     #           | deprel                    | deprel
-    #         tokenA              =>       tokenX 
+    #         tokenA              =>       tokenX
     #       /conj    \ conj          /conj  |conj  \conj
     #   tokenB        tokenC      tokenA   tokenB   tokenC
     for tokenA_id in coordinations:
@@ -295,7 +295,7 @@ def inspect_dataset(dataset, stats):
                 ref_count[refid] += 1
             else:
                 ref_count[refid] = 1
-       
+
     # build chain length statistics
     for refid in ref_count:
         stats.chain_lengths[ref_count[refid]] += 1
@@ -359,10 +359,10 @@ if __name__ == '__main__':
             mentions = get_mentions(sentence)
 
             for token in sentence:
-                token.COREF = '_'
+                token.COREF_HEAD = '_'
 
             for mention in mentions:
-                sentence[mention['head']].COREF = mention['refid']
+                sentence[mention['head']].COREF_HEAD = mention['refid']
             logging.info('Number of mentions in sentence {}'.format(len(mentions)))
             mentions_in_doc += len(mentions)
             tokens_in_doc += len(sentence)

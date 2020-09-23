@@ -18,7 +18,7 @@ COPULA_NOUN_DESC_MOVE_TO_VERB = [
 
 class Token():
     """A class representing a single token, ie. a word, with its annotation."""
-    def __init__(self, fields, isEncoded=False):
+    def __init__(self, fields, isEncoded=False, is_preprocessed=False):
         self.isEncoded = isEncoded
         if len(fields) < 10:
             logging.warn(
@@ -51,10 +51,18 @@ class Token():
 
         # Treat field 12 as co-reference info
         # NOTE: this a private extension the to conllu format
+        self.COREF = None
+        self.COREF_HEAD = None
         if len(fields) >= 13:
-            self.COREF = fields[12]
+            if is_preprocessed:
+                self.COREF_HEAD = fields[12]
+            else:
+                self.COREF = fields[12]
         else:
-            self.COREF = '_'
+            if is_preprocessed:
+                self.COREF_HEAD = '_'
+            else:
+                self.COREF = '_'
 
         # For coreference resolution
         if len(fields) >= 14:
