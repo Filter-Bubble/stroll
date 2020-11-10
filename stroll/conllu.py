@@ -231,6 +231,7 @@ class ConlluDataset(Dataset):
     def __init__(self, filename=None):
         self.sentences = []
         self.doc_lengths = OrderedDict()
+        self._id_to_index = None  # maps sentence.sent_id to int index in dataset
 
         if filename is not None:
             self._load(filename)
@@ -385,7 +386,22 @@ class ConlluDataset(Dataset):
         sentence.dataset = self
         self.sentences.append(sentence)
 
+        # force rebuilding of the sent_id lookup table
+        self._id_to_index = None
+
+    def _build_id_to_index(self):
+        self._id_to_index = {}
+        for i, sentence in enumerate(self.sentences):
+            self._id_to_index[sentence.sent_id] = i
+
+    def index(self, ID):
+        if self._id_to_index is None:
+            self._build_id_to_index()
+        return self._id_to_index[ID]
+
     def __getitem__(self, index):
+        if isinstance(index, str):
+            index = self.index(index)
         return self.sentences[index]
 
     def __iter__(self):

@@ -12,3 +12,4 @@ seaborn
 stanza
 scorch
 Jinja2
+KafNafParserPy
