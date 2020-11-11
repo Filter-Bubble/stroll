@@ -1,4 +1,5 @@
 import logging
+import sys
 
 from KafNafParserPy import KafNafParser, Clp, Cspan, Cpredicate, Crole
 from KafNafParserPy.span_data import Ctarget
@@ -61,14 +62,15 @@ def write_frames_to_naf(naf, frames, sentence):
         naf.add_predicate(pred_obj)
 
 
-def load_naf(filename):
+def load_naf_stdin():
     """Load a dataset in NAF format.
 
-    Use this function to create a new ConlluDataset from a NAF file.
+    Use this function to create a new ConlluDataset from a NAF file,
+    read from stdin.
 
     NOTE: you can only add to NAF files, not create one from scratch.
     """
-    my_parser = KafNafParser(filename)    
+    my_parser = KafNafParser(sys.stdin)    
 
     my_dataset = ConlluDataset()
 

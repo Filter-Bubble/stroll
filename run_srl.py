@@ -1,10 +1,13 @@
+#!/usr/bin/env python3
 import torch
 import argparse
+import sys
+import logging
 
 import dgl
 from torch.utils.data import DataLoader
 
-from stroll.naf import load_naf, write_frames_to_naf, write_header_to_naf
+from stroll.naf import load_naf_stdin, write_frames_to_naf, write_header_to_naf
 from stroll.conllu import ConlluDataset
 from stroll.graph import GraphDataset
 from stroll.srl import make_frames
@@ -16,12 +19,12 @@ from progress.bar import Bar
 
 # TODO: default Ctarget is from the opinion module, and does not have a set_id()
 
-parser = argparse.ArgumentParser(description='Evaluate model')
+parser = argparse.ArgumentParser(description='Semantic Role Labelling. Read data in conll or NAF format, and write results to stdout.')
 parser.add_argument(
         '--batch_size',
         dest='batch_size',
         default=50,
-        help='Evaluation batch size.'
+        help='Inference batch size.'
         )
 parser.add_argument(
         '--model',
@@ -33,11 +36,11 @@ parser.add_argument(
         '--naf',
         default=False,
         action='store_true',
-        help='Input file in in NAF format'
+        help='Input in NAF format from stdin'
         )
 parser.add_argument(
-        'dataset',
-        help='Evaluation dataset',
+        '--dataset',
+        help='Input in conll format from file',
         )
 
 
@@ -69,7 +72,8 @@ def infer(net, loader, batch_size=50):
                 # rules
                 frames, orphans = make_frames(sentence)
 
-                write_frames_to_naf(naf, frames, sentence)
+                if naf:
+                    write_frames_to_naf(naf, frames, sentence)
 
             progbar.next(batch_size)
 
@@ -91,9 +95,13 @@ if __name__ == '__main__':
         sentence_encoder = None
 
     if args.naf:
-        dataset, naf = load_naf(args.dataset)
-    else:
+        dataset, naf = load_naf_stdin()
+    elif args.dataset:
+        naf = None
         dataset = ConlluDataset(args.dataset)
+    else:
+        logging.error('No input, you must use --naf or --dataset.')
+        sys.exit(-1)
 
     eval_set = GraphDataset(
             dataset=dataset,
@@ -122,3 +130,5 @@ if __name__ == '__main__':
     if args.naf:
         write_header_to_naf(naf)
         naf.dump()
+    else:
+        print(dataset)
