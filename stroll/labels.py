@@ -89,13 +89,29 @@ FRAME_WEIGHTS = torch.Tensor([1., 10.])
 # COREF related
 MENTION_TYPES = ['LIST', 'PRONOMIAL', 'PROPER', 'NOMINAL']
 
+
+class ignoreUnkownEncoder(LabelEncoder):
+    """A wrapper around the LabelEncoder that silently ingores unknown labels."""
+    def transform(self, y):
+        res = []
+        for label in y:
+            try:
+                res.append(super().transform([label])[0])
+            except ValueError:
+                # ignore unknow labels
+                pass
+
+        return res
+
+
 upos_codec = LabelEncoder().fit(UPOS)
 xpos_codec = LabelEncoder().fit(XPOS)
 deprel_codec = LabelEncoder().fit(DEPREL)
-feats_codec = LabelEncoder().fit(FEATS)
+feats_codec = ignoreUnkownEncoder().fit(FEATS)  # we dont use/support all possible features
 frame_codec = LabelEncoder().fit(FRAMES)
 role_codec = LabelEncoder().fit(ROLES)
 mention_type_codec = LabelEncoder().fit(MENTION_TYPES)
+
 
 
 def to_one_hot(codec, values):
