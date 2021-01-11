@@ -1,3 +1,5 @@
+from progress.bar import Bar
+from stroll.naf import write_frames_to_naf
 import logging
 
 import numpy as np
@@ -10,6 +12,7 @@ from torch.utils.data import DataLoader
 from stroll.model import Net
 from stroll.graph import GraphDataset
 from stroll.labels import BertEncoder, FasttextEncoder
+
 
 class Frame():
     def __init__(self, token=None, p=0.):
@@ -33,15 +36,15 @@ class Frame():
 
     def __repr__(self):
         string = '{} {} ({}) p={:.2f} nargs={}:\n'.format(
-                self.ID, self.FORM, self.LEMMA,
-                self.p, len(self.arguments)
-                )
+            self.ID, self.FORM, self.LEMMA,
+            self.p, len(self.arguments)
+        )
 
         for argument in self.arguments:
             string += '   {} {} ({:.2f}): {}\n'.format(
-                    argument['id'], argument['role'],
-                    argument['p'], argument['text']
-                    )
+                argument['id'], argument['role'],
+                argument['p'], argument['text']
+            )
 
         return string
 
@@ -149,21 +152,57 @@ def make_frames(sentence):
             if fid not in frames:
                 # TODO: this is a candidate frame, add it anyways
                 frames[fid] = Frame(
-                        sentence[fid], sentence[fid].pFRAME
-                        )
+                    sentence[fid], sentence[fid].pFRAME
+                )
             frames[fid].add_argument(
-                    role=arguments[wid],
-                    p=sentence[wid].pROLE,
-                    id=wid,
-                    ids=role_ids[wid],
-                    text=role_text[wid]
-                    )
+                role=arguments[wid],
+                p=sentence[wid].pROLE,
+                id=wid,
+                ids=role_ids[wid],
+                text=role_text[wid]
+            )
         else:
             orphans.add_argument(
-                    role=arguments[wid],
-                    p=sentence[wid].pROLE,
-                    id=wid,
-                    ids=role_ids[wid],
-                    text=role_text[wid]
-                    )
+                role=arguments[wid],
+                p=sentence[wid].pROLE,
+                id=wid,
+                ids=role_ids[wid],
+                text=role_text[wid]
+            )
     return frames, orphans
+
+
+def infer(net, loader, dataset, batch_size=50, naf_obj=None):
+    predicted_frames = []
+    predicted_roles = []
+
+    progbar = Bar('Evaluating', max=len(loader))
+
+    net.eval()
+    with torch.no_grad():
+        for gs in loader:
+
+            frame_labels, role_labels, \
+                frame_chance, role_chance = net.label(gs)
+
+            node_offset = 0
+            for g in dgl.unbatch(gs):
+                sentence = dataset.conllu(g)
+                for i, token in enumerate(sentence):
+                    token.ROLE = role_labels[i + node_offset]
+                    token.pROLE = role_chance[i + node_offset]
+
+                    token.FRAME = frame_labels[i + node_offset]
+                    token.pFRAME = frame_chance[i + node_offset]
+                node_offset += len(g)
+
+                # match the predicate and roles by some simple graph traversal
+                # rules
+                frames, orphans = make_frames(sentence)
+
+                if naf_obj:
+                    write_frames_to_naf(naf_obj, frames, sentence)
+
+            progbar.next(batch_size)
+
+    progbar.finish()
