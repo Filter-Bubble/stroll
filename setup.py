@@ -7,7 +7,7 @@ with open('requirements.txt') as f:
     required = f.read().splitlines()
 
 setuptools.setup(
-    name="stroll-jiskattema",
+    name="stroll-srl",
     version="0.0.1",
     author="Jisk Attema",
     author_email="j.attema@esciencecenter.nl",
