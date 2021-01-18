@@ -21,7 +21,6 @@ from stroll.labels import BertEncoder, FasttextEncoder, \
         role_codec, frame_codec
 from stroll.loss import CrossEntropy, FocalLoss, Bhattacharyya, \
         HingeSquared, KullbackLeibler
-from stroll.train import get_optimizer_and_scheduler_for_net
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -32,6 +31,49 @@ writer = None
 args = None
 
 torch.manual_seed(43)
+
+
+def get_optimizer_and_scheduler_for_net(
+        net,
+        solver='CE',
+        learning_rate=1e-2,
+        ):
+    if solver == 'SGD':
+        optimizer = torch.optim.SGD(
+            net.parameters(),
+            lr=learning_rate,
+            momentum=0.9
+            )
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer,
+            step_size=3,
+            gamma=0.9
+            )
+    elif solver == 'ADAM':
+        optimizer = torch.optim.Adam(
+            net.parameters(),
+            lr=learning_rate,
+            )
+        scheduler = None
+        # scheduler = torch.optim.lr_scheduler.LambdaLR(
+        #     optimizer,
+        #     lr_lambda=[lambda epoch: 0.9**min(max(0, (epoch - 4) // 2), 36)],
+        #     )
+    elif solver == 'ADAMW':
+        optimizer = torch.optim.AdamW(
+            net.parameters(),
+            lr=learning_rate
+            )
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer,
+            step_size=100,
+            gamma=1.0
+            )
+    else:
+        print('Solver not implemented.')
+        sys.exit(-1)
+
+    return optimizer, scheduler
 
 # Not used at the moment
 # device = 'cuda' if torch.cuda.is_available() else 'cpu'

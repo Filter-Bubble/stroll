@@ -46,12 +46,6 @@ python3 -m venv env
 pip install -r requirements.txt
 ```
 
-# Plans
-
-* Train frames and roles separately, to see effect of multi-task learning;
-* Reconsider how we use the BERT wordvectors. We now first encode a whole sentence, and sum the resulting vectors per bert-token to our tokeninzation. Alternatively, per word we find the sentence part it is the head of, and encode that.
-
-
 # Best model until now
 
 ## Model layers
@@ -178,25 +172,6 @@ The best model was after 6628920 words, or 15 epochs.
 |weighted avg |      0.94  |    0.94  |    0.94   |  49479|
 
 
-# Ensemble prediction
-
-We trained several models, most of which are similarly good (or bad).
-An ensemble is a method to further increase the model performance.
-For this we need a way to combine the indenpendent classifications in a single classifier.
-A simple way is to use marjority voting: the label with the most votes wins.
-But this does not make the best use of the separate classifiers.
-We'll combine the individual label distributions in a single distribution by multiplying the distributions.
-This is known as 'conflation' (in physics), or 'product-of-experts', or a logarithmic opinion pool.
-
-## unweighted
-First we'll try an unweighted product.
-
-## weighted
-
-We are also looking into using weight factors, following the references below.
-The idea is to minimize the KL divergence of ensemble.
-
-
 # References
 
 1. [Encoding Sentences with Graph Convolutional Networks for Semantic Role Labeling](https://arxiv.org/abs/1703.04826)
@@ -212,47 +187,3 @@ The idea is to minimize the KL divergence of ensemble.
 11. [On Loss Functions for Deep Neural Networks in Classification](https://arxiv.org/abs/1702.05659)
 12. [Training Products of Experts by Minimizing Contrastive Divergence](https://www.mitpressjournals.org/doi/10.1162/089976602760128018)
 13. [Selecting weighting factors in logarithmic opinion pools.pdf](https://dl.acm.org/doi/10.5555/3008904.3008942)
-
-
-
-# best srl:
-runs_srl/ADAM_1e-02_FL1.50e+00cst_50b_100d_2l_reluUPOS_FEATS_DEPREL_WVEC_FT100/model_005925154.pt.eval
-
-# best mention:
-runs_mentions/ADAMv3.32_1e-03_150b_HL_64d_2lUPOS_FEATS_DEPREL_WVEC_FT50/model_030325091.pt
-
-# best coref:
-On the test set:
-
-|------|------|------|---------|
-|      |  R   |   P  |  F      |
-|------|------|------|---------|
-|muc   | 47.06| 55.12| 50.08   |
-|b3    | 82.19| 86.48| 84.02   |
-|ceafe | 85.51| 81.38| 83.18   |
-|conll |      |      | 72.43   |
-|------|------|------|---------|
-
-(runs_coref/ADAMv4.11_1e-03_50b_HL_100d_2l_WVEC_DEPREL_FT50/model_005840868.pt)
-
-# best entity:
-On the test set:
-
-|------|------|------|---------|
-|      |  R   |   P  |  F      |
-|------|------|------|---------|
-|muc   | 47.34| 60.30| 51.63   |
-|b3    | 82.87| 88.95| 85.47   |
-|ceafe | 86.77| 80.74| 83.36   |
-|conll |      |      | 73.49   |
-|------|------|------|---------|
-
-(runs_entity/entity_v0.52_30_stat/model_000022850.pt)
-
-# try it:
-python3 run_stanza.py --output jenj.conll jip_en_janneke.txt
-python3 postprocess_srl.py --output jenj_srl.conll jenj.conll
-python3 run_mentions.py --output jenj_mentions.conll jenj_srl.conll
-python3 run_coref.py --html coref.html --output jenj_coref.conll jenj_mentions.conll
-python3 run_entity.py --html entity.html --output jenj_entity.conll jenj_mentions.conll
-google-chrome coref.html entity.html

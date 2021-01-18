@@ -7,7 +7,7 @@ import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 
 parser = argparse.ArgumentParser(
-        description='Train a R-GCN for Semantic Roll Labelling.'
+        description='Draw a dependency graph with SRL annotations'
         )
 parser.add_argument(
         '--conllu',
