@@ -49,19 +49,6 @@ class Token():
             self.pFRAME = 0.
             self.pROLE = 0.
 
-        # Treat field 12 as co-reference info
-        # NOTE: this a private extension the to conllu format
-        if len(fields) >= 13:
-            self.COREF = fields[12]
-        else:
-            self.COREF = '_'
-
-        # For coreference resolution
-        if len(fields) >= 14:
-            self.anaphore = float(fields[13])
-        else:
-            self.anaphore = -100
-
         # We also allow labelling using sentence encoders (BERT/ FastText)
         self.WVEC = None
 
@@ -70,10 +57,10 @@ class Token():
             return 'Encoded'
         else:
             # Used for outputting back to conllu
-            return "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
+            return "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
                 self.ID, self.FORM, self.LEMMA, self.UPOS, self.XPOS,
                 self.FEATS, self.HEAD, self.DEPREL, self.DEPS, self.MISC,
-                self.FRAME, self.ROLE, self.COREF
+                self.FRAME, self.ROLE
                 )
 
     def __getitem__(self, index):
@@ -91,16 +78,9 @@ class Token():
             return self.ROLE
         elif index == 'WVEC':
             return self.WVEC
-        elif index == 'COREF':
-            return self.COREF
         return None
 
     def encode(self):
-        if self.COREF in ['_', '-'] or '(' in self.COREF or ')' in self.COREF:
-            coref = torch.tensor([0], dtype=torch.int32)
-        else:
-            coref = torch.tensor([int(self.COREF) + 1], dtype=torch.int32)
-
         return Token([
             self.ID,  # not encoded
             self.FORM,  # encoded later by sentence encoder
@@ -113,9 +93,7 @@ class Token():
             self.DEPS,  # not encoded
             self.MISC,  # not encoded
             to_index(frame_codec, self.FRAME),
-            to_index(role_codec, self.ROLE),
-            coref,
-            self.anaphore
+            to_index(role_codec, self.ROLE)
             ], isEncoded=True)
 
 
@@ -314,8 +292,7 @@ class ConlluDataset(Dataset):
                   '_',  # DEPS = fields[8]
                   '_',  # MISC = fields[9]
                   '_',  # FRAME = fields[10]
-                  '_',  # ROLE = fields[11]
-                  fields[3]  # COREF = fields[12]
+                  '_'   # ROLE = fields[11]
                 ]))
                 full_text.append(fields[2])
 
@@ -426,207 +403,3 @@ class ConlluDataset(Dataset):
                 frame_counts[token.FRAME] = frame_counts[token.FRAME] + 1
 
         return role_counts, frame_counts
-
-
-def transform_coordinations(sentence):
-    """
-    Transform UD coordination to be more like SD coordination.
-
-    Universal Dependency style coordination is not suitable for our head-based
-    approach; in the text '.. A and B ..' the possible heads are:
-
-    A which will correspond to the text 'A and B'
-    B which will correspond to 'and B'.
-
-    Add an extra node, and transform the dependency graph, to allow selecting:
-    'A', 'and B', 'A and B'
-    """
-
-    # find all coordinations, ie. tokens with DEPREL = 'conj'
-    coordinations = {}
-    for token in sentence:
-        if token.DEPREL == 'conj':
-            # identify the coordinations by the head
-            coordination_id = token.HEAD
-            if coordination_id in coordinations:
-                coordinations[coordination_id].append(token.ID)
-            else:
-                coordinations[coordination_id] = [token.ID]
-
-    # transform each coordination
-    #           ^                           ^
-    #           | deprel                    | deprel
-    #         tokenA              =>       tokenX
-    #       /conj    \ conj          /conj  |conj  \conj
-    #   tokenB        tokenC      tokenA   tokenB   tokenC
-    for tokenA_id in coordinations:
-        coordination = coordinations[tokenA_id]
-        tokenA = sentence[tokenA_id]
-
-        # attach tokens directly to the original HEAD of the first token
-        for token_id in coordination:
-            sentence[token_id].HEAD = tokenA.HEAD
-
-        # create a dummy node to represent the full coordination
-        tokenX = Token([
-            '{}'.format(len(sentence) + 1),  # ID
-            '',  # FORM
-            '',  # LEMMA
-            '_',  # UPOS
-            'mv',  # XPOS
-            'Number=Plur',  # FEATS
-            tokenA.HEAD,
-            tokenA.DEPREL,
-            tokenA.DEPS,
-            tokenA.MISC,
-            tokenA.FRAME,
-            tokenA.ROLE,
-            '_'  # COREF
-            ])
-
-        # attach all tokens to the dummy
-        for token_id in coordination:
-            sentence[token_id].HEAD = tokenX.ID
-
-        tokenA.HEAD = tokenX.ID
-        tokenA.DEPREL = 'conj'
-        tokenA.FRAME = '_'
-        tokenA.ROLE = '_'
-
-        sentence.add(tokenX)
-
-        # fix remaining issues:
-        # - punctuation is a child of the root token
-        if tokenX.DEPREL == 'root':
-            for token in sentence:
-                if token.DEPREL == 'punct':
-                    token.HEAD = tokenX.ID
-
-    return sentence
-
-
-def swap_copula(sentence, noun, verb):
-    """
-    We promote the copula token to be the head (like other verbs would be),
-    and attach the mention to it.  We then try to clean up the graph by moving
-    a number of descendants of the old head (ie part the mention) to the
-    copula. The choice is based on the DEPREL, for a list see
-    COPULA_NOUN_DESC_MOVE_TO_VERB.
-    """
-    # 1. swap the deprel of the 'cop' and its syntactic head
-    # (lets call it its noun)
-    verb.DEPREL = noun.DEPREL
-    noun.DEPREL = 'cop'
-    verb.HEAD = noun.HEAD
-    noun.HEAD = verb.ID
-
-    # 2. of the dependents of the noun, move some to the verb
-    for token in sentence:
-        if token.HEAD == noun.ID:
-            if token.DEPREL in COPULA_NOUN_DESC_MOVE_TO_VERB:
-                token.HEAD = verb.ID
-
-    return sentence
-
-
-def transform_copulas(sentence):
-    """
-    Transform the UD copola usage.
-
-    We focus on Dutch, which has explicit copolas: 'Dat is fantastisch.'
-    UD requires 'Dat' to be the head, which leads to mentions spanning the
-    whole sentence, which in turn will confuse all our mention and pairwise
-    mention features (nesting, matching).
-
-    For cases with multiple linked copulas 'Dat is en blijft fantastisch',
-    we set the DEPREL to 'conj', like UD does for normal verbs.
-    """
-    # 1. gather all 'cop' that point to another 'cop'
-    copulas = []
-    chained_copulas = []
-    for token in sentence:
-        if token.DEPREL != 'cop':
-            continue
-        if token.HEAD == '0':
-            # Inconceivable! DEPREL == 'cop', but HEAD == '0'
-            return sentence
-
-        if sentence[token.HEAD].DEPREL == 'cop':
-            # we have a -cop-> b -cop-> ..
-            # turn this into a conjunction
-            chained_copulas.append(token)
-        else:
-            copulas.append(token)
-
-    # if we didnt find any copulas we're done
-    if len(copulas) == 0:
-        return sentence
-
-    # 2. change the releation to conj
-    for token in chained_copulas:
-        token.DEPREL = 'conj'
-
-    # 3. swap the noun and verb
-    for verb in copulas:
-        noun = sentence[verb.HEAD]
-        swap_copula(sentence, noun, verb)
-
-    # 4. Clean-up:, all 'punct' must point to the head
-    for token in sentence:
-        if token.HEAD == '0':
-            # found the head
-            head_id = token.ID
-            break
-
-    for token in sentence:
-        if token.DEPREL == 'punct':
-            token.HEAD = head_id
-
-    return sentence
-
-
-def transform_tree(sentence):
-    """
-    Make dependency graph better suited for our task.
-    This calls: transform_copulas and transform_coordinations.
-    """
-    sentence = transform_copulas(sentence)
-    sentence = transform_coordinations(sentence)
-    return sentence
-
-def write_output_conll2012(dataset, filename):
-    keyfile = open(filename, 'w')
-
-    firstDoc = True
-    current_doc = None
-    for sentence in dataset:
-        if sentence.doc_id != current_doc:
-            if firstDoc:
-                firstDoc = False
-            else:
-                keyfile.write('#end document\n')
-
-            current_doc = sentence.doc_id
-            keyfile.write('#begin document ({});\n'.format(current_doc))
-        else:
-            keyfile.write('\n')
-
-        for token in sentence:
-            if token.FORM == '':
-                # these are from unfolding the coordination clauses, dont print
-                if token.COREF != '_':
-                    logging.error(
-                            'Hidden token has a coref={}'.format(token.COREF)
-                            )
-                    print(sentence)
-                    print()
-                continue
-            if token.COREF != '_':
-                coref = token.COREF
-            else:
-                coref = '-'
-            keyfile.write('{}\t0\t{}\t{}\t{}\n'.format(
-                sentence.doc_id, token.ID, token.FORM, coref))
-
-    keyfile.write('#end document\n')
-    keyfile.close()
