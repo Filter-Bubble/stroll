@@ -1,6 +1,5 @@
 torch
 dgl
-networkx
 matplotlib
 numpy
 sklearn
@@ -10,6 +9,4 @@ argparse
 fasttext
 seaborn
 stanza
-scorch
-Jinja2
 KafNafParserPy
