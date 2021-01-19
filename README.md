@@ -5,6 +5,15 @@ The goal is to make something reasonably state-of-the-art for the Dutch language
 
 This is work in progress.
 
+# Quick start
+
+## Download wordvectors and trained model
+
+```
+python -m stroll.download
+```
+
+
 ## Training data
 
 [SoNaR](http://lands.let.ru.nl/projects/SoNaR/) contains a annotated dataset of 500K words.
