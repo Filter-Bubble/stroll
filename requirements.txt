@@ -3,7 +3,6 @@ dgl
 matplotlib
 numpy
 sklearn
-transformers
 progress
 argparse
 fasttext

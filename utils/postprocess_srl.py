@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 
 from stroll.model import Net
 from stroll.graph import GraphDataset
-from stroll.labels import BertEncoder, FasttextEncoder
+from stroll.labels import FasttextEncoder
 
 
 parser = argparse.ArgumentParser(
@@ -154,10 +154,7 @@ if __name__ == '__main__':
     hyperparams = state_dict.pop('hyperparams')
 
     if 'WVEC' in hyperparams.features:
-        if hyperparams.fasttext:
-            sentence_encoder = FasttextEncoder(hyperparams.fasttext)
-        else:
-            sentence_encoder = BertEncoder()
+        sentence_encoder = FasttextEncoder(hyperparams.fasttext)
     else:
         sentence_encoder = None
 

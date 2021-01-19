@@ -17,8 +17,7 @@ from stroll.graph import GraphDataset
 from stroll.model import Net
 from stroll.labels import FRAME_WEIGHTS, ROLE_WEIGHTS, \
         ROLE_TARGET_DISTRIBUTIONS
-from stroll.labels import BertEncoder, FasttextEncoder, \
-        role_codec, frame_codec
+from stroll.labels import FasttextEncoder, role_codec, frame_codec
 from stroll.loss import CrossEntropy, FocalLoss, Bhattacharyya, \
         HingeSquared, KullbackLeibler
 
@@ -406,8 +405,6 @@ if __name__ == '__main__':
     if 'WVEC' in args.features:
         if args.fasttext:
             sentence_encoder = FasttextEncoder(args.fasttext)
-        else:
-            sentence_encoder = BertEncoder()
         exp_name += '_' + sentence_encoder.name
     else:
         sentence_encoder = None

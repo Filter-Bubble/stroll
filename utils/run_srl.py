@@ -12,7 +12,7 @@ from stroll.conllu import ConlluDataset
 from stroll.graph import GraphDataset
 from stroll.srl import make_frames, infer
 from stroll.model import Net
-from stroll.labels import BertEncoder, FasttextEncoder
+from stroll.labels import FasttextEncoder
 from stroll.labels import frame_codec, role_codec
 
 from progress.bar import Bar
@@ -30,7 +30,7 @@ parser.add_argument(
 parser.add_argument(
     '--model',
     dest='model_name',
-    help='Model to evaluate',
+    help='Model to use for inference',
     required=True
 )
 parser.add_argument(
@@ -52,10 +52,7 @@ if __name__ == '__main__':
     hyperparams = state_dict.pop('hyperparams')
 
     if 'WVEC' in hyperparams.features:
-        if hyperparams.fasttext:
-            sentence_encoder = FasttextEncoder(hyperparams.fasttext)
-        else:
-            sentence_encoder = BertEncoder()
+        sentence_encoder = FasttextEncoder(hyperparams.fasttext)
     else:
         sentence_encoder = None
 

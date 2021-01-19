@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 
 from stroll.graph import GraphDataset
 from stroll.model import Net
-from stroll.labels import BertEncoder, FasttextEncoder
+from stroll.labels import FasttextEncoder
 from stroll.labels import frame_codec, role_codec
 
 from sklearn.metrics import confusion_matrix, classification_report
@@ -197,10 +197,7 @@ if __name__ == '__main__':
     hyperparams = state_dict.pop('hyperparams')
 
     if 'WVEC' in hyperparams.features:
-        if hyperparams.fasttext:
-            sentence_encoder = FasttextEncoder(hyperparams.fasttext)
-        else:
-            sentence_encoder = BertEncoder()
+        sentence_encoder = FasttextEncoder(hyperparams.fasttext)
     else:
         sentence_encoder = None
 

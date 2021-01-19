@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 
 from stroll.model import Net
 from stroll.graph import GraphDataset
-from stroll.labels import BertEncoder, FasttextEncoder
+from stroll.labels import FasttextEncoder
 
 
 class Frame():
