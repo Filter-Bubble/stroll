@@ -1,6 +1,6 @@
 import argparse
 import logging
-import sys
+from os import mkdir
 from pathlib import Path
 import urllib.request
 
@@ -18,23 +18,44 @@ logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
 
 
-def download_srl_model(datapath):
+def download_srl_model(datapath='models', name_model=None, name_fasttext=None):
     datapath = Path(datapath)
-    fname_fasttext = datapath / 'fasttext.model.bin'
-    fname_model = datapath / 'srl.pt'
-    if not fname_fasttext.exists():
-        url = 'https://surfdrive.surf.nl/files/index.php/s/085yxFcRmn0osMw/download'
-        urllib.request.urlretrieve(url, fname_fasttext)
-    else:
-        logger.info('fasttext.model.bin found')
 
-    if not fname_model.exists():
-        url = 'https://surfdrive.surf.nl/files/index.php/s/kOgUm0oEpmx5HiZ/download'
-        urllib.request.urlretrieve(url, fname_model)
-    else:
-        logger.info('srl.pt found')
+    if not datapath.exists():
+        mkdir(datapath)
 
-    return fname_fasttext, fname_model
+    if name_model:
+        # explicitly named model
+        fname_model = datapath / name_model
+    else:
+        # default model
+        fname_model = datapath / 'srl.pt'
+
+        if not fname_model.exists():
+            # download if not found
+            logger.info('Downloading srl.pt')
+            url = 'https://surfdrive.surf.nl/files/index.php/s/kOgUm0oEpmx5HiZ/download'
+            urllib.request.urlretrieve(url, fname_model)
+        else:
+            logger.info('srl.pt found')
+
+    if name_fasttext:
+        # explicitly named fasttext
+        fname_fasttext = datapath / name_fasttext
+    else:
+        # default fasttext
+        fname_fasttext = datapath / 'fasttext.model.bin'
+
+        if not fname_fasttext.exists():
+            # download if not found
+            logger.info('Downloading fasttext.model.bin')
+            url = 'https://surfdrive.surf.nl/files/index.php/s/085yxFcRmn0osMw/download'
+            urllib.request.urlretrieve(url, fname_fasttext)
+        else:
+            logger.info('fasttext.model.bin found')
+
+
+    return str(fname_fasttext), str(fname_model)
 
 
 if __name__ == '__main__':

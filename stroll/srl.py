@@ -1,17 +1,55 @@
-from progress.bar import Bar
-from stroll.naf import write_frames_to_naf
+import sys
 import logging
+import argparse
+from progress.bar import Bar
+from stroll.download import download_srl_model
+from stroll.model import Net
+from stroll.graph import ConlluDataset, GraphDataset
+from stroll.labels import FasttextEncoder
+from stroll.naf import write_frames_to_naf
+from stroll.naf import load_naf_stdin, write_frames_to_naf, write_header_to_naf
 
 import numpy as np
-
 import dgl
 
 import torch
 from torch.utils.data import DataLoader
 
-from stroll.model import Net
-from stroll.graph import GraphDataset
-from stroll.labels import FasttextEncoder
+
+parser = argparse.ArgumentParser(
+    description='Semantic Role Labelling. Read data in conll or NAF format, and write results to stdout.')
+parser.add_argument(
+    '--batch_size',
+    dest='batch_size',
+    default=50,
+    help='Inference batch size.'
+)
+parser.add_argument(
+    '--model',
+    default='srl.pt',
+    dest='model_name',
+    help='Model to use for inference'
+)
+parser.add_argument(
+    '--naf',
+    default=False,
+    action='store_true',
+    help='Input in NAF format from stdin'
+)
+parser.add_argument(
+    '--dataset',
+    help='Input in conll format from file',
+)
+parser.add_argument(
+    '--path',
+    dest='path',
+    default='models',
+    help='Path to the models directory'
+)
+
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.StreamHandler())
 
 
 class Frame():
@@ -172,11 +210,9 @@ def make_frames(sentence):
     return frames, orphans
 
 
-def infer(net, loader, dataset, batch_size=50, naf_obj=None):
+def predict(net, loader, dataset, batch_size=50, naf_obj=None, progbar=None):
     predicted_frames = []
     predicted_roles = []
-
-    progbar = Bar('Evaluating', max=len(loader))
 
     net.eval()
     with torch.no_grad():
@@ -203,6 +239,64 @@ def infer(net, loader, dataset, batch_size=50, naf_obj=None):
                 if naf_obj:
                     write_frames_to_naf(naf_obj, frames, sentence)
 
-            progbar.next(batch_size)
+            if progbar:
+                progbar.next(batch_size)
 
-    progbar.finish()
+    if progbar:
+        progbar.finish()
+
+
+if __name__ == '__main__':
+    logger.setLevel(logging.INFO)
+    args = parser.parse_args()
+
+    # get Paths to default SRL and FastText models
+    fname_fasttext, fname_model = download_srl_model(datapath=args.path)
+
+    state_dict = torch.load(fname_model)
+
+    hyperparams = state_dict.pop('hyperparams')
+    if 'WVEC' in hyperparams.features:
+        sentence_encoder = FasttextEncoder(fname_fasttext)
+    else:
+        sentence_encoder = None
+
+    if args.naf:
+        dataset, naf = load_naf_stdin()
+    elif args.dataset:
+        naf = None
+        dataset = ConlluDataset(args.dataset)
+    else:
+        logger.error('No input, you must use --naf or --dataset.')
+        sys.exit(-1)
+
+    eval_set = GraphDataset(
+        dataset=dataset,
+        sentence_encoder=sentence_encoder,
+        features=hyperparams.features
+    )
+    evalloader = DataLoader(
+        eval_set,
+        batch_size=args.batch_size,
+        num_workers=2,
+        collate_fn=dgl.batch
+    )
+
+    net = Net(
+        in_feats=eval_set.in_feats,
+        h_layers=hyperparams.h_layers,
+        h_dims=hyperparams.h_dims,
+        out_feats_a=2,
+        out_feats_b=19,
+        activation='relu'
+    )
+    net.load_state_dict(state_dict)
+
+    progbar = Bar('Evaluating', max=len(evalloader))
+    predict(net, evalloader, eval_set, batch_size=50, naf_obj=naf, progbar=progbar)
+
+    if args.naf:
+        write_header_to_naf(naf)
+        naf.dump()
+    else:
+        print(dataset)

@@ -7,10 +7,8 @@ This is work in progress.
 
 # Quick start
 
-## Download wordvectors and trained model
-
 ```
-python -m stroll.download
+python -m stroll.srl --dataset example.conll
 ```
 
 
