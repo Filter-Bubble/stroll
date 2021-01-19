@@ -68,7 +68,6 @@ class GraphDataset(Dataset):
                     0).view(1, -1),
                 'frame': token.FRAME,
                 'role': token.ROLE,
-                'coref': token.COREF,
                 'sent_index': torch.tensor([index], dtype=torch.int32),
                 'token_index': torch.tensor(
                     [sentence.index(token.ID)],
