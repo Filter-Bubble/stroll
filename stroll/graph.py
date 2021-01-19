@@ -4,7 +4,7 @@ import dgl
 from torch.utils.data import Dataset
 from .conllu import ConlluDataset
 
-from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec
+from .labels import upos_codec, xpos_codec, deprel_codec, feats_codec, get_dims_for_features
 
 RELATION_TYPE_SELF = torch.tensor([0])
 RELATION_TYPE_HEAD = torch.tensor([1])
@@ -26,6 +26,12 @@ class GraphDataset(Dataset):
             self.dataset = dataset
 
         self.sentence_encoder = sentence_encoder
+
+        in_feats = get_dims_for_features(features)
+        if 'WVEC' in features:
+            in_feats += self.sentence_encoder.dims
+
+        self.in_feats = in_feats
         self.features = features
 
         self.in_feats = 0

@@ -7,10 +7,36 @@ This is work in progress.
 
 # Quick start
 
+## Run it on Conll files
+
 ```
 python -m stroll.srl --dataset example.conll
 ```
 
+## Use it in a Stanza Pipeline directly from python
+
+You can add Stroll to a Stanza pipeline by importing ```stroll.stanza``` and
+adding ```srl``` to the Stanza processors.
+This will add an *srl* and *frame* attribute to words.
+(Note that these are not printed when printing the Stanza Document, Sentence, or Word objects.)
+
+```
+import stanza
+import stroll.stanza
+
+nlp = stanza.Pipeline(lang='nl', processors='tokenize,lemma,pos,depparse,srl')
+doc = nlp('Stroll annoteert semantic roles.')
+
+for s in doc.sentences:
+    for w in s.words:
+        print(w.lemma, w.srl, w.frame)
+
+Stroll Arg0 _
+annoteren _ rel
+semantic Arg1 _
+roles _ _
+. _ _
+```
 
 ## Training data
 

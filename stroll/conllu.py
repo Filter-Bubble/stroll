@@ -49,6 +49,11 @@ class Token():
             self.pFRAME = 0.
             self.pROLE = 0.
 
+        if len(fields) >= 13:
+            self.COREF = fields[12]
+        else:
+            self.COREF = '_'
+
         # We also allow labelling using sentence encoders (BERT/ FastText)
         self.WVEC = None
 
@@ -57,10 +62,10 @@ class Token():
             return 'Encoded'
         else:
             # Used for outputting back to conllu
-            return "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
+            return "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
                 self.ID, self.FORM, self.LEMMA, self.UPOS, self.XPOS,
                 self.FEATS, self.HEAD, self.DEPREL, self.DEPS, self.MISC,
-                self.FRAME, self.ROLE
+                self.FRAME, self.ROLE, self.COREF
                 )
 
     def __getitem__(self, index):
@@ -76,6 +81,8 @@ class Token():
             return self.FRAME
         elif index == 'ROLE':
             return self.ROLE
+        elif index == 'COREF':
+            return self.COREF
         elif index == 'WVEC':
             return self.WVEC
         return None
@@ -93,7 +100,8 @@ class Token():
             self.DEPS,  # not encoded
             self.MISC,  # not encoded
             to_index(frame_codec, self.FRAME),
-            to_index(role_codec, self.ROLE)
+            to_index(role_codec, self.ROLE),
+            self.COREF  # not encoded
             ], isEncoded=True)
 
 

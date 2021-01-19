@@ -92,13 +92,13 @@ def dataset_from_text_files(names=None, dataset=None):
                         if 'feats' not in t:
                             t['feats'] = '_'
                         token = Token([
-                          t['id'],  # ID
+                          str(t['id']),  # ID
                           t['text'],  # FORM
                           t['lemma'],  # LEMMA
                           t['upos'],  # UPOS
                           t['xpos'],  # XPOS
                           t['feats'],  # FEATS
-                          '{}'.format(t['head']),  # HEAD
+                          str(t['head']),  # HEAD
                           t['deprel'],  # DEPREL
                           '_',  # DEPS
                           '_'  # MISC

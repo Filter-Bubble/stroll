@@ -134,3 +134,16 @@ class FasttextEncoder:
             word_vectors.append(torch.Tensor(self.model[token.FORM]))
 
         return word_vectors
+
+
+def get_dims_for_features(features):
+    in_feats = 0
+    if 'UPOS' in features:
+        in_feats = in_feats + len(upos_codec.classes_)
+    if 'XPOS' in features:
+        in_feats = in_feats + len(xpos_codec.classes_)
+    if 'FEATS' in features:
+        in_feats = in_feats + len(feats_codec.classes_)
+    if 'DEPREL' in features:
+        in_feats = in_feats + len(deprel_codec.classes_)
+    return in_feats
