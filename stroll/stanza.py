@@ -2,6 +2,8 @@ import stanza
 import torch
 import dgl
 
+from pathlib import Path
+
 from stroll.conllu import Token, Sentence, ConlluDataset
 from stroll.graph import GraphDataset
 from stroll.labels import FasttextEncoder, get_dims_for_features
@@ -32,7 +34,8 @@ class SrlProcessor(Processor):
     
     def __init__(self, config, pipeline, use_gpu):
         # get Paths to default SRL and FastText models
-        fname_fasttext, fname_model = download_srl_model()
+        datapath = Path(config['model_path']).parent
+        fname_fasttext, fname_model = download_srl_model(datapath=datapath)
 
         state_dict = torch.load(fname_model)
 
@@ -116,7 +119,6 @@ class SrlProcessor(Processor):
                     for w, word in enumerate(input_sentence.words):
                         word.srl = role_labels[w + word_offset]
                         word.frame = frame_labels[w + word_offset]
-                        print (w,word)
                     word_offset += len(g)
                     sent_id += 1
 
