@@ -8,7 +8,7 @@ with open('requirements.txt') as f:
 
 setuptools.setup(
     name="stroll-srl",
-    version="0.0.1",
+    version="0.5.1",
     author="Jisk Attema",
     author_email="j.attema@esciencecenter.nl",
     description="Graph based semantic role labeler",
