@@ -1,5 +1,7 @@
 # Graph based Semantic Role Labeller
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.5153315.svg)](https://doi.org/10.5281/zenodo.5153315)
+
 This is a semantic role laballer based on a graph convolutional network.
 The goal is to make something reasonably state-of-the-art for the Dutch language.
 
