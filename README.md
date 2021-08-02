@@ -7,6 +7,15 @@ This is work in progress.
 
 # Quick start
 
+## Install package
+
+Setup a virtual env with python3, and install dependencies:
+```bash
+python3 -m venv env
+. env/bin/activate
+pip install stroll.srl
+```
+
 ## Run it on Conll files
 
 ```
@@ -37,6 +46,8 @@ semantic Arg1 _
 roles _ _
 . _ _
 ```
+
+# Details
 
 ## Training data
 
@@ -69,17 +80,6 @@ One to indicate if this word is a frame, and one to indicate if the word is the 
 As node features we can use the information in the conllu file.
 We also added pre-trained word vectors form either fasttext, or BERTje.
 Finally, we add a positional encoding (ie. 'first descendant').
-
-# Installation
-
-Setup a virtual env with python3, and install dependencies:
-```bash
-python3 -m venv env
-. env/bin/activate
-pip install -r requirements.txt
-```
-
-# Best model until now
 
 ## Model layers
 
